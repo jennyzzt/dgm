@@ -1,30 +1,46 @@
 from pathlib import Path
 import subprocess
+from typing import Optional, List, Tuple, Union
 
 def tool_info():
     return {
         "name": "editor",
         "description": """Custom editing tool for viewing, creating, and editing files\n
 * State is persistent across command calls and discussions with the user.\n
-* If `path` is a file, `view` displays the entire file with line numbers. If `path` is a directory, `view` lists non-hidden files and directories up to 2 levels deep.\n
+* If `path` is a file, `view` displays the file with line numbers. With optional `view_range` [start, end], it displays only specified lines. Use -1 in `end` for all remaining lines.\n
+* If `path` is a directory, `view` lists non-hidden files and directories up to 2 levels deep.\n
 * The `create` command cannot be used if the specified `path` already exists as a file.\n
 * If a `command` generates a long output, it will be truncated and marked with `<response clipped>`.\n
-* The `edit` command overwrites the entire file with the provided `file_text`.\n
-* No partial/line-range edits or partial viewing are supported.""",
+* The `str_replace` command replaces a unique occurrence of old_str with new_str, failing if old_str is not found or appears multiple times.""",
         "input_schema": {
             "type": "object",
             "properties": {
                 "command": {
                     "type": "string",
-                    "enum": ["view", "create", "edit"],
-                    "description": "The command to run: `view`, `create`, or `edit`."
+                    "enum": ["view", "create", "str_replace"],
+                    "description": "The command to run: `view`, `create`, or `str_replace`."
                 },
                 "path": {
                     "description": "Absolute path to file or directory, e.g. `/repo/file.py` or `/repo`.",
                     "type": "string"
                 },
                 "file_text": {
-                    "description": "Required parameter of `create` or `edit` command, containing the content for the entire file.",
+                    "description": "Required parameter of `create` command, containing the content for the entire file.",
+                    "type": "string"
+                },
+                "view_range": {
+                    "description": "Optional parameter for `view` command. Array of [start_line, end_line] (1-based). Use -1 for end_line to read until end of file.",
+                    "type": "array",
+                    "items": {"type": "integer"},
+                    "minItems": 2,
+                    "maxItems": 2
+                },
+                "old_str": {
+                    "description": "Required parameter of `str_replace` command, containing the exact text to find and replace.",
+                    "type": "string"
+                },
+                "new_str": {
+                    "description": "Required parameter of `str_replace` command, containing the new text to replace old_str with.",
                     "type": "string"
                 }
             },
@@ -43,7 +59,7 @@ def validate_path(path: str, command: str) -> Path:
     Validate the file path for each command:
       - 'view': path may be a file or directory; must exist.
       - 'create': path must not exist (for new file creation).
-      - 'edit': path must exist (for overwriting).
+      - 'str_replace': path must exist and be a file.
     """
     path_obj = Path(path)
 
@@ -61,7 +77,7 @@ def validate_path(path: str, command: str) -> Path:
         # Path must not exist
         if path_obj.exists():
             raise ValueError(f"Cannot create new file; {path} already exists.")
-    elif command == "edit":
+    elif command == "str_replace":
         # Path must exist and must be a file
         if not path_obj.exists():
             raise ValueError(f"The file {path} does not exist.")
@@ -89,6 +105,46 @@ def read_file(path: Path) -> str:
     except Exception as e:
         raise ValueError(f"Failed to read file: {e}")
 
+def read_file_range(path: Path, line_range: Optional[List[int]] = None) -> Tuple[str, int]:
+    """
+    Read and return file contents within specified line range.
+    Returns tuple of (content, start_line).
+
+    Args:
+        path: Path object for the file
+        line_range: Optional [start, end] line numbers (1-based). Use -1 for end to read until EOF.
+    """
+    try:
+        if line_range is None:
+            return read_file(path), 1
+
+        start, end = line_range
+        if start < 1:
+            raise ValueError("Start line must be >= 1")
+        if end != -1 and end < start:
+            raise ValueError("End line must be >= start line or -1")
+
+        with path.open() as f:
+            # Skip lines before start
+            for _ in range(start - 1):
+                next(f, None)
+
+            lines = []
+            current_line = start
+            while True:
+                line = next(f, None)
+                if line is None:  # EOF
+                    break
+                if end != -1 and current_line > end:
+                    break
+                lines.append(line.rstrip('\n'))
+                current_line += 1
+
+        return '\n'.join(lines), start
+
+    except Exception as e:
+        raise ValueError(f"Failed to read file range: {e}")
+
 def write_file(path: Path, content: str):
     """Write (overwrite) entire file contents."""
     try:
@@ -96,9 +152,40 @@ def write_file(path: Path, content: str):
     except Exception as e:
         raise ValueError(f"Failed to write file: {e}")
 
-def view_path(path_obj: Path) -> str:
-    """View the entire file contents or directory listing."""
+def str_replace_in_file(path: Path, old_str: str, new_str: str) -> str:
+    """
+    Replace an exact occurrence of old_str with new_str in the file.
+    Only performs the replacement if old_str occurs exactly once.
+    Returns a message indicating success or failure.
+    """
+    try:
+        content = read_file(path)
+        occurrences = content.count(old_str)
+
+        if occurrences == 0:
+            return f"Error: Could not find the exact text to replace in {path}"
+        elif occurrences > 1:
+            return f"Error: Found multiple ({occurrences}) occurrences of the text in {path}. Must be unique."
+        else:
+            new_content = content.replace(old_str, new_str)
+            write_file(path, new_content)
+            return f"Successfully replaced text in {path}"
+
+    except Exception as e:
+        return f"Error during string replacement: {e}"
+
+def view_path(path_obj: Path, view_range: Optional[List[int]] = None) -> str:
+    """
+    View the file contents (optionally within a range) or directory listing.
+
+    Args:
+        path_obj: Path object for the file or directory
+        view_range: Optional [start, end] line numbers for file viewing
+    """
     if path_obj.is_dir():
+        if view_range is not None:
+            raise ValueError("view_range is not supported for directory listings")
+
         # For directories: list non-hidden files up to 2 levels deep
         try:
             result = subprocess.run(
@@ -115,22 +202,23 @@ def view_path(path_obj: Path) -> str:
         except Exception as e:
             raise ValueError(f"Failed to list directory: {e}")
 
-    # If it's a file, show the entire file with line numbers
-    content = read_file(path_obj)
-    return format_output(content, str(path_obj))
+    # If it's a file, show the file content (with optional line range)
+    content, start_line = read_file_range(path_obj, view_range)
+    return format_output(content, str(path_obj), start_line)
 
-def tool_function(command: str, path: str, file_text: str = None) -> str:
+def tool_function(command: str, path: str, file_text: str = None, view_range: Optional[List[int]] = None,
+                 old_str: str = None, new_str: str = None) -> str:
     """
     Main tool function that handles:
-      - 'view'  : View the entire file or directory listing
-      - 'create': Create a new file with the given file_text
-      - 'edit'  : Overwrite an existing file with file_text
+      - 'view'       : View file or directory listing, optionally within line range for files
+      - 'create'     : Create a new file with the given file_text
+      - 'str_replace': Replace exact occurrence of old_str with new_str in the file
     """
     try:
         path_obj = validate_path(path, command)
 
         if command == "view":
-            return view_path(path_obj)
+            return view_path(path_obj, view_range)
 
         elif command == "create":
             if file_text is None:
@@ -138,11 +226,10 @@ def tool_function(command: str, path: str, file_text: str = None) -> str:
             write_file(path_obj, file_text)
             return f"File created successfully at: {path}"
 
-        elif command == "edit":
-            if file_text is None:
-                raise ValueError("Missing required `file_text` for 'edit' command.")
-            write_file(path_obj, file_text)
-            return f"File at {path} has been overwritten with new content."
+        elif command == "str_replace":
+            if old_str is None or new_str is None:
+                raise ValueError("Missing required `old_str` and/or `new_str` for 'str_replace' command.")
+            return str_replace_in_file(path_obj, old_str, new_str)
 
         else:
             raise ValueError(f"Unknown command: {command}")

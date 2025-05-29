@@ -4,7 +4,6 @@ import re
 import anthropic
 import backoff
 import openai
-import copy
 
 from llm import create_client, get_response_from_llm
 from prompts.tooluse_prompt import get_tooluse_prompt
@@ -30,7 +29,7 @@ def process_tool_call(tools_dict, tool_name, tool_input):
 )
 def get_response_withtools(
     client, model, messages, tools, tool_choice,
-    logging=None, max_retry=3
+    logging=None, system_message=None,
 ):
     try:
         if 'claude' in model:
@@ -42,27 +41,43 @@ def get_response_withtools(
                 tools=tools,
             )
         elif model.startswith('o3-'):
-            response = client.responses.create(
+            response = client.chat.completions.create(
                 model=model,
-                input=messages,
+                messages=messages,
                 tool_choice=tool_choice,
                 tools=tools,
-                parallel_tool_calls=False
             )
-            response = response
+            response = response.choices[0].message
         else:
             raise ValueError(f"Unsupported model: {model}")
         return response
     except Exception as e:
-        logging(f"Error in get_response_withtools: {str(e)}")
-        if max_retry > 0:
-            return get_response_withtools(client, model, messages, tools, tool_choice, logging, max_retry - 1)
+        error_msg = str(e)
+        logging(f"Error in get_response_withtools: {error_msg}")
 
         # Hitting the context window limit
-        if 'Input is too long for requested model' in str(e):
-            pass
+        if 'Input is too long for requested model' in error_msg or 'maximum context length' in error_msg:
+            if not system_message:
+                # Extract system message from the first message if available
+                system_message = messages[0].get('content', '') if messages else ''
+                if isinstance(system_message, list):
+                    system_message = ' '.join(block['text'] for block in system_message if block['type'] == 'text')
 
-        raise  # Re-raise the exception after logging
+            # Summarize the conversation history
+            summarized_messages = summarize_messages(client, model, messages, system_message)
+
+            # Retry with summarized messages
+            return get_response_withtools(
+                client=client,
+                model=model,
+                messages=summarized_messages,
+                tools=tools,
+                tool_choice=tool_choice,
+                logging=logging,
+                system_message=system_message
+            )
+
+        raise  # Re-raise other exceptions
 
 def check_for_tool_use(response, model=''):
     """
@@ -80,15 +95,13 @@ def check_for_tool_use(response, model=''):
 
     elif model.startswith('o3-'):
         # OpenAI, check for tool_calls in response
-        for tool_call in response.output:
-            if tool_call.type == "function_call":
-                break
-
-        if tool_call:
+        tool_calls = response.tool_calls
+        if tool_calls:
+            tool_call = tool_calls[0]
             return {
-                'tool_id': tool_call.call_id,
-                'tool_name': tool_call.name,
-                'tool_input': json.loads(tool_call.arguments),
+                'tool_id': tool_call.id,
+                'tool_name': tool_call.function.name,
+                'tool_input': json.loads(tool_call.function.arguments),
             }
 
     else:
@@ -119,28 +132,13 @@ def convert_tool_info(tool_info, model=None):
             'input_schema': tool_info['input_schema'],
         }
     elif model.startswith('o3-'):
-        def add_additional_properties(d):
-            if isinstance(d, dict):
-                if 'properties' in d:
-                    d['additionalProperties'] = False
-                for k, v in d.items():
-                    add_additional_properties(v)
-        add_additional_properties(tool_info['input_schema'])
-        for p in tool_info['input_schema']['properties'].keys():
-            if not p in tool_info['input_schema']['required']:
-                tool_info['input_schema']['required'].append(p)
-                t = copy.deepcopy(tool_info['input_schema']['properties'][p]["type"])
-                if isinstance(t, str):
-                    tool_info['input_schema']['properties'][p]["type"] = [t, "null"]
-                elif isinstance(t, list):
-                    tool_info['input_schema']['properties'][p]["type"] = t + ["null"]
-                
         return {
             'type': 'function',
-            'name': tool_info['name'],
-            'description': tool_info['description'],
-            'parameters': tool_info['input_schema'],
-            "strict": True,
+            'function': {
+                'name': tool_info['name'],
+                'description': tool_info['description'],
+                'parameters': tool_info['input_schema'],
+            },
         }
     else:
         return tool_info
@@ -268,6 +266,57 @@ def convert_msg_history_openai(msg_history):
 
     return new_msg_history
 
+def summarize_messages(client, model, messages, system_message):
+    """
+    Creates a condensed summary of older messages while preserving recent context.
+    Only summarizes assistant and user messages, keeps tool results as is for accuracy.
+    """
+    # Keep the most recent messages intact
+    recent_msgs = messages[-2:] if len(messages) > 2 else messages
+    if len(messages) <= 2:
+        return messages
+
+    # Prepare messages to be summarized
+    msgs_to_summarize = messages[:-2]
+
+    # Create a prompt to summarize the conversation
+    summary_request = "Please create a concise summary of this conversation that preserves the key context and important details:"
+    for msg in msgs_to_summarize:
+        if isinstance(msg.get('content', ''), list):
+            content = ' '.join(block['text'] for block in msg['content'] if block['type'] == 'text')
+        else:
+            content = str(msg.get('content', ''))
+        if msg.get('role') in ['assistant', 'user']:
+            summary_request += f"\n{msg['role']}: {content}"
+
+    try:
+        # Get summary from the model
+        summary_response, _ = get_response_from_llm(
+            msg=summary_request,
+            client=client,
+            model=model,
+            system_message="You are a summarizer. Create a concise but informative summary.",
+            print_debug=False,
+            msg_history=[]
+        )
+
+        # Create new message history with the summary
+        summarized_history = [{
+            "role": "system",
+            "content": [{"type": "text", "text": system_message}]
+        }, {
+            "role": "assistant",
+            "content": [{"type": "text", "text": f"Previous conversation summary: {summary_response}"}]
+        }]
+
+        # Add back the recent messages
+        summarized_history.extend(recent_msgs)
+
+        return summarized_history
+    except Exception:
+        # If summarization fails, return original messages with the most recent ones
+        return [messages[0]] + recent_msgs
+
 def convert_msg_history(msg_history, model=None):
     """
     Convert message history from the model-specific format to a generic format.
@@ -284,7 +333,14 @@ def chat_with_agent_manualtools(msg, model, msg_history=None, logging=print):
     if msg_history is None:
         msg_history = []
     system_message = f'You are a coding agent.\n\n{get_tooluse_prompt()}'
-    new_msg_history = msg_history
+    new_msg_history = msg_history.copy() if msg_history else []
+
+    # Ensure system message is the first message in history
+    if not new_msg_history or new_msg_history[0].get('role') != 'system':
+        new_msg_history.insert(0, {
+            "role": "system",
+            "content": [{"type": "text", "text": system_message}]
+        })
 
     try:
         # Load all tools
@@ -438,14 +494,13 @@ def chat_with_agent_openai(
             "role": "user",
             "content": [
                 {
-                    "type": "input_text",
+                    "type": "text",
                     "text": msg,
                 }
             ],
         }
     ]
-    separator = '=' * 10
-    logging(f"\n{separator} User Instruction {separator}\n{msg}")
+
     try:
         # Create client
         client, client_model = create_client(model)
@@ -464,30 +519,21 @@ def chat_with_agent_openai(
             tools=tools,
             logging=logging,
         )
-        logging(f"\n{separator} Agent Response {separator}\n{response}")
 
         # Check for tool use
         tool_use = check_for_tool_use(response, model=client_model)
-        logging(tool_use)
         while tool_use:
             # Process tool call
             tool_name = tool_use['tool_name']
             tool_input = tool_use['tool_input']
             tool_result = process_tool_call(tools_dict, tool_name, tool_input)
 
-            logging(f"Tool Used: {tool_name}")
-            logging(f"Tool Input: {tool_input}")
-            logging(f"Tool Result: {tool_result}")
-
             # Get tool response
-            for tool_call in response.output:
-                if tool_call.type == "function_call":
-                    break
-            new_msg_history.append(tool_call)
+            new_msg_history.append(response)
             new_msg_history.append({
-                "type": "function_call_output",
-                "call_id": tool_use['tool_id'],
-                "output": tool_result,
+                "role": "tool",
+                "tool_call_id": tool_use['tool_id'],
+                "content": tool_result,
             })
             response = get_response_withtools(
                 client=client,
@@ -500,8 +546,6 @@ def chat_with_agent_openai(
 
             # Check for next tool use
             tool_use = check_for_tool_use(response, model=client_model)
-
-            logging(f"Tool Response: {response}")
 
         # Get final response
         new_msg_history.append(response)
@@ -533,8 +577,10 @@ def chat_with_agent(
     elif model.startswith('o3-'):
         # OpenAI models
         new_msg_history = chat_with_agent_openai(msg, model=model, msg_history=msg_history, logging=logging)
-        # Current version does not support cross-model conversion
-        # new_msg_history = convert_msg_history(new_msg_history, model=model)
+        conv_msg_history = convert_msg_history(new_msg_history, model=model)
+        logging(conv_msg_history)
+        if convert:
+            new_msg_history = conv_msg_history
         new_msg_history = msg_history + new_msg_history
 
     else:
