@@ -10,6 +10,7 @@ import openai
 MAX_OUTPUT_TOKENS = 4096
 AVAILABLE_LLMS = [
     # Anthropic models
+    "claude-sonnet-4",
     "claude-3-5-sonnet-20240620",
     "claude-3-5-sonnet-20241022",
     # OpenAI models
@@ -21,6 +22,7 @@ AVAILABLE_LLMS = [
     "o1-2024-12-17",
     "o3-mini-2025-01-31",
     # OpenRouter models (Anthropic)
+    "anthropic/claude-sonnet-4",
     "anthropic/claude-3-5-sonnet-20241022",
     "anthropic/claude-3-5-sonnet-20240620",
     "anthropic/claude-3-haiku-20240307",

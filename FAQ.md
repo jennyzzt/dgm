@@ -25,7 +25,7 @@ EVAL_HELPER_MODEL="openai/o3-mini-2025-01-31"             # Cost-effective evalu
 
 #### Performance-Optimized Configuration
 ```bash
-CODING_AGENT_MODEL="anthropic/claude-3-5-sonnet-20241022"  # Best coding performance
+CODING_AGENT_MODEL="anthropic/claude-sonnet-4"            # Latest, most advanced
 OPENAI_DIAGNOSIS_MODEL="openai/o1-2024-12-17"             # Advanced reasoning
 DEFAULT_OPENAI_MODEL="openai/gpt-4o-2024-08-06"           # High-quality general use
 EVAL_HELPER_MODEL="openai/o1-2024-12-17"                  # Advanced evaluation
@@ -36,7 +36,7 @@ EVAL_HELPER_MODEL="openai/o1-2024-12-17"                  # Advanced evaluation
 **A:** Each role serves a specific purpose:
 
 1. **Coding Agent Model**: Primary model for generating and modifying code
-   - **Recommendation**: Claude Sonnet 4.0 (best coding performance)
+   - **Recommendation**: Claude Sonnet 4 (latest, most advanced) or Claude 3.5 Sonnet (proven performance)
    - **Usage**: Core self-improvement code generation
 
 2. **Diagnosis Model**: Analyzes problems and failures in self-improvement cycles
@@ -113,7 +113,7 @@ DEEPSEEK_API_KEY="your_deepseek_key"
 
 #### Direct Provider APIs
 ```bash
-CODING_AGENT_MODEL="claude-3-5-sonnet-20241022"  # Direct Anthropic
+CODING_AGENT_MODEL="claude-sonnet-4"             # Direct Anthropic (Latest)
 OPENAI_DIAGNOSIS_MODEL="o1-2024-12-17"           # Direct OpenAI
 ANTHROPIC_API_KEY="your_anthropic_key"
 OPENAI_API_KEY="your_openai_key"

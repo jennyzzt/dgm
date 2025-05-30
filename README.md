@@ -104,6 +104,7 @@ The Darwin Gödel Machine uses four different LLM roles that can be independentl
 #### OpenRouter Models (Recommended)
 ```bash
 # Anthropic models via OpenRouter
+anthropic/claude-sonnet-4               # Latest Claude Sonnet 4 - Most Advanced
 anthropic/claude-3-5-sonnet-20241022    # Best for coding (recommended for CODING_AGENT_MODEL)
 anthropic/claude-3-5-sonnet-20240620
 anthropic/claude-3-haiku-20240307       # Fast and cost-effective
@@ -119,6 +120,7 @@ openai/gpt-4o-mini-2024-07-18          # Cost-effective general purpose
 #### Direct Provider Models
 ```bash
 # Direct Anthropic API
+claude-sonnet-4                        # Latest Claude Sonnet 4
 claude-3-5-sonnet-20241022
 claude-3-5-sonnet-20240620
 
@@ -164,6 +166,49 @@ EVAL_HELPER_MODEL="openai/o1-2024-12-17"                  # Advanced evaluation
 python DGM_outer.py
 ```
 By default, outputs will be saved in the `output_dgm/` directory.
+
+## Post-Run Analysis and Cleanup
+
+After running the DGM, you can use the provided tool to analyze results and clean up resources:
+
+### Automatic Summarize and Cleanup
+```bash
+# Automatically find latest output and run full cleanup
+python summarize_and_cleanup.py
+
+# Or explicitly use auto-detection
+python summarize_and_cleanup.py --auto
+
+# Options:
+python summarize_and_cleanup.py --aggressive-images  # Aggressive Docker image cleanup
+python summarize_and_cleanup.py --no-docker          # Skip Docker cleanup
+python summarize_and_cleanup.py --quiet              # Minimal output
+```
+
+### Manual Analysis and Cleanup for Specific Run
+```bash
+# Generate improvement summary for specific run
+python summarize_improvements.py --path output_dgm/20250530153630_095830
+
+# Full cleanup with Docker and file cleanup for specific path
+python summarize_and_cleanup.py --path output_dgm/20250530153630_095830
+
+# Cleanup options:
+python summarize_and_cleanup.py --path <path> --no-docker          # Skip Docker cleanup
+python summarize_and_cleanup.py --path <path> --no-images         # Skip image cleanup
+python summarize_and_cleanup.py --path <path> --aggressive-images # Remove untagged images
+python summarize_and_cleanup.py --path <path> --no-files          # Skip temp file cleanup
+python summarize_and_cleanup.py --path <path> --quiet             # Minimal output
+```
+
+### What the Cleanup Tools Do
+- **Improvement Analysis**: Generates comprehensive reports on agent performance improvements
+- **Docker Container Cleanup**: Removes DGM-related Docker containers
+- **Docker Image Cleanup**: Removes DGM-related Docker images to free disk space
+- **Temporary File Cleanup**: Removes temporary files, caches, and logs
+- **Report Generation**: Creates detailed cleanup and improvement reports
+
+The cleanup tools will generate a `cleanup_report.txt` file in the output directory with detailed information about what was accomplished during the DGM run and what resources were cleaned up.
 
 ## File Structure
 - `analysis/` scripts used for plotting and analysis
