@@ -1,5 +1,134 @@
 # Darwin Gödel Machine - Frequently Asked Questions
 
+## LLM Configuration and Model Selection
+
+### Q: Which LLM provider should I use?
+
+**A:** We recommend **OpenRouter** for simplicity and cost-effectiveness:
+
+- **Single API key** for all models
+- **Competitive pricing** across providers
+- **Easy model switching** without changing API configurations
+- **Access to latest models** from multiple providers
+
+### Q: What models should I use for each role?
+
+**A:** The DGM uses four different LLM roles:
+
+#### Recommended Configuration (Cost-Optimized)
+```bash
+CODING_AGENT_MODEL="anthropic/claude-3-5-sonnet-20241022"  # Best coding performance
+OPENAI_DIAGNOSIS_MODEL="openai/o3-mini-2025-01-31"        # Cost-effective reasoning
+DEFAULT_OPENAI_MODEL="openai/o3-mini-2025-01-31"          # Cost-effective general use
+EVAL_HELPER_MODEL="openai/o3-mini-2025-01-31"             # Cost-effective evaluation
+```
+
+#### Performance-Optimized Configuration
+```bash
+CODING_AGENT_MODEL="anthropic/claude-3-5-sonnet-20241022"  # Best coding performance
+OPENAI_DIAGNOSIS_MODEL="openai/o1-2024-12-17"             # Advanced reasoning
+DEFAULT_OPENAI_MODEL="openai/gpt-4o-2024-08-06"           # High-quality general use
+EVAL_HELPER_MODEL="openai/o1-2024-12-17"                  # Advanced evaluation
+```
+
+### Q: What's the difference between the four model roles?
+
+**A:** Each role serves a specific purpose:
+
+1. **Coding Agent Model**: Primary model for generating and modifying code
+   - **Recommendation**: Claude Sonnet 4.0 (best coding performance)
+   - **Usage**: Core self-improvement code generation
+
+2. **Diagnosis Model**: Analyzes problems and failures in self-improvement cycles
+   - **Recommendation**: O3-mini (cost-effective) or O1 (advanced reasoning)
+   - **Usage**: Understanding why improvements failed
+
+3. **Default OpenAI Model**: General-purpose model for tool use and utilities
+   - **Recommendation**: O3-mini (cost-effective) or GPT-4o (higher quality)
+   - **Usage**: Tool interactions and general tasks
+
+4. **Evaluation Helper Model**: Assists with evaluation and tie-breaking decisions
+   - **Recommendation**: O3-mini (cost-effective) or O1 (advanced analysis)
+   - **Usage**: Comparing solutions and evaluation assistance
+
+### Q: Can I use different providers for different roles?
+
+**A:** Yes! You can mix and match providers:
+
+```bash
+# Example: OpenRouter for coding, direct OpenAI for reasoning
+CODING_AGENT_MODEL="anthropic/claude-3-5-sonnet-20241022"  # OpenRouter
+OPENAI_DIAGNOSIS_MODEL="o1-2024-12-17"                    # Direct OpenAI
+DEFAULT_OPENAI_MODEL="openai/o3-mini-2025-01-31"          # OpenRouter
+EVAL_HELPER_MODEL="o1-2024-12-17"                         # Direct OpenAI
+```
+
+### Q: What are the cost implications of different model choices?
+
+**A:** Model costs vary significantly:
+
+#### Cost Tiers (Approximate)
+- **Most Expensive**: O1 models, Claude Opus
+- **Moderate**: GPT-4o, Claude Sonnet
+- **Cost-Effective**: O3-mini, GPT-4o-mini, Claude Haiku
+
+#### Cost Optimization Tips
+1. Use **O3-mini for diagnosis and evaluation** (high reasoning at low cost)
+2. Use **Claude Sonnet only for coding** (where quality matters most)
+3. Use **OpenRouter** for better pricing across providers
+4. Monitor usage through provider dashboards
+
+### Q: How do I switch between different model configurations?
+
+**A:** Simply update your `.env` file:
+
+```bash
+# Edit .env file
+nano .env
+
+# Or export environment variables
+export CODING_AGENT_MODEL="anthropic/claude-3-5-sonnet-20241022"
+export OPENAI_DIAGNOSIS_MODEL="openai/o3-mini-2025-01-31"
+```
+
+Changes take effect on the next DGM run.
+
+### Q: What if I want to use AWS Bedrock or other providers?
+
+**A:** The system supports multiple providers:
+
+#### AWS Bedrock
+```bash
+CODING_AGENT_MODEL="bedrock/us.anthropic.claude-3-5-sonnet-20241022-v2:0"
+AWS_REGION="us-east-1"
+AWS_ACCESS_KEY_ID="your_key"
+AWS_SECRET_ACCESS_KEY="your_secret"
+```
+
+#### DeepSeek
+```bash
+CODING_AGENT_MODEL="deepseek-coder"
+DEEPSEEK_API_KEY="your_deepseek_key"
+```
+
+#### Direct Provider APIs
+```bash
+CODING_AGENT_MODEL="claude-3-5-sonnet-20241022"  # Direct Anthropic
+OPENAI_DIAGNOSIS_MODEL="o1-2024-12-17"           # Direct OpenAI
+ANTHROPIC_API_KEY="your_anthropic_key"
+OPENAI_API_KEY="your_openai_key"
+```
+
+### Q: How do I know which models are available?
+
+**A:** Check the `AVAILABLE_LLMS` list in [`llm.py`](llm.py:11-42) for all supported models:
+
+- **OpenRouter models**: `anthropic/`, `openai/` prefixes
+- **Direct provider models**: No prefix (e.g., `claude-3-5-sonnet-20241022`)
+- **AWS Bedrock models**: `bedrock/` prefix
+- **DeepSeek models**: `deepseek-` prefix
+- **Other models**: Various specialized models
+
 ## Understanding DGM Results and Behavior
 
 ### Q: What does "compilation failed" mean in the DGM output?

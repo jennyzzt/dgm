@@ -25,7 +25,7 @@ from utils.docker_utils import (
 )
 
 dataset = None
-diagnose_model = 'o1-2024-12-17'
+diagnose_model = os.getenv('OPENAI_DIAGNOSIS_MODEL', 'o1-2024-12-17')
 
 def diagnose_problem(entry, commit, root_dir, out_dir, patch_files=[], max_attempts=3, polyglot=False):
     client = create_client(diagnose_model)

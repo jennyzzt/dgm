@@ -1,5 +1,6 @@
 import ast
 import json
+import os
 import re
 import anthropic
 import backoff
@@ -10,8 +11,8 @@ from llm import create_client, get_response_from_llm
 from prompts.tooluse_prompt import get_tooluse_prompt
 from tools import load_all_tools
 
-CLAUDE_MODEL = 'bedrock/us.anthropic.claude-3-5-sonnet-20241022-v2:0'
-OPENAI_MODEL = 'o3-mini-2025-01-31'
+CLAUDE_MODEL = os.getenv('CODING_AGENT_MODEL', 'bedrock/us.anthropic.claude-3-5-sonnet-20241022-v2:0')
+OPENAI_MODEL = os.getenv('DEFAULT_OPENAI_MODEL', 'o3-mini-2025-01-31')
 
 def process_tool_call(tools_dict, tool_name, tool_input):
     try:
@@ -33,7 +34,7 @@ def get_response_withtools(
     logging=None, max_retry=3
 ):
     try:
-        if 'claude' in model:
+        if 'claude' in model or model.startswith('anthropic/'):
             response = client.messages.create(
                 model=model,
                 messages=messages,
@@ -41,7 +42,7 @@ def get_response_withtools(
                 tool_choice=tool_choice,
                 tools=tools,
             )
-        elif model.startswith('o3-'):
+        elif model.startswith('o3-') or model.startswith('openai/o3-'):
             response = client.responses.create(
                 model=model,
                 input=messages,
@@ -68,7 +69,7 @@ def check_for_tool_use(response, model=''):
     """
     Checks if the response contains a tool call.
     """
-    if 'claude' in model:
+    if 'claude' in model or model.startswith('anthropic/'):
         # Claude, check for stop_reason in response
         if response.stop_reason == "tool_use":
             tool_use_block = next(block for block in response.content if block.type == "tool_use")
@@ -78,7 +79,7 @@ def check_for_tool_use(response, model=''):
                 'tool_input': tool_use_block.input,
             }
 
-    elif model.startswith('o3-'):
+    elif model.startswith('o3-') or model.startswith('openai/o3-'):
         # OpenAI, check for tool_calls in response
         for tool_call in response.output:
             if tool_call.type == "function_call":
@@ -111,14 +112,14 @@ def convert_tool_info(tool_info, model=None):
     """
     Converts tool_info from Claude format to the given model's format.
     """
-    if 'claude' in model:
+    if 'claude' in model or model.startswith('anthropic/'):
         # should have no change
         return {
             'name': tool_info['name'],
             'description': tool_info['description'],
             'input_schema': tool_info['input_schema'],
         }
-    elif model.startswith('o3-'):
+    elif model.startswith('o3-') or model.startswith('openai/o3-'):
         def add_additional_properties(d):
             if isinstance(d, dict):
                 if 'properties' in d:
@@ -272,9 +273,9 @@ def convert_msg_history(msg_history, model=None):
     """
     Convert message history from the model-specific format to a generic format.
     """
-    if 'claude' in model:
+    if 'claude' in model or model.startswith('anthropic/'):
         return convert_msg_history_claude(msg_history)
-    elif model.startswith('o3-'):
+    elif model.startswith('o3-') or model.startswith('openai/o3-'):
         return convert_msg_history_openai(msg_history)
     else:
         return msg_history
@@ -521,7 +522,7 @@ def chat_with_agent(
     if msg_history is None:
         msg_history = []
 
-    if 'claude' in model:
+    if 'claude' in model or model.startswith('anthropic/'):
         # Claude models
         new_msg_history = chat_with_agent_claude(msg, model=model, msg_history=msg_history, logging=logging)
         conv_msg_history = convert_msg_history(new_msg_history, model=model)
@@ -530,7 +531,7 @@ def chat_with_agent(
             new_msg_history = conv_msg_history
         new_msg_history = msg_history + new_msg_history
 
-    elif model.startswith('o3-'):
+    elif model.startswith('o3-') or model.startswith('openai/o3-'):
         # OpenAI models
         new_msg_history = chat_with_agent_openai(msg, model=model, msg_history=msg_history, logging=logging)
         # Current version does not support cross-model conversion

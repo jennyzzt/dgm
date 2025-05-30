@@ -1,3 +1,4 @@
+import os
 import random
 from llm import create_client, extract_json_between_markers, get_response_from_llm
 from llm_withtools import convert_msg_history
@@ -55,7 +56,7 @@ def score_tie_breaker(problem_statement, code_diffs, test_reports, best_score_in
     best_score_indices = list(range(len(code_diffs))) if not best_score_indices else best_score_indices
     best_score_index = best_score_indices[0]
     try:
-        client = create_client('o1-2024-12-17')
+        client = create_client(os.getenv('EVAL_HELPER_MODEL', 'o1-2024-12-17'))
         proposed_solutions = [f'# Proposed solution {i+1}\n\n<code_diff_{i+1}>\n{code_diffs[index]}\n</code_diff{i+1}>\n<test_report_{i+1}>\n{test_reports[index]}\n</test_report_{i+1}>' for i, index in enumerate(best_score_indices)]
         proposed_solutions = '\n\n'.join(proposed_solutions)
         prompt = f"""Given the following problem statement, proposed solutions, and test reports, provide a summary of the differences between the code diffs and an evaluation of the proposed solutions.
