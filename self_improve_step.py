@@ -270,10 +270,27 @@ def self_improve(
     client = docker.from_env()
     # Remove any existing container with the same name
     remove_existing_container(client, container_name)
-    # Now create and start the container
+    
+    # Prepare environment variables for container
+    env_vars = {
+        "ANTHROPIC_API_KEY": os.getenv('ANTHROPIC_API_KEY'),
+        "AWS_REGION": os.getenv('AWS_REGION'),
+        "AWS_REGION_NAME": os.getenv('AWS_REGION_NAME'),
+        "AWS_ACCESS_KEY_ID": os.getenv('AWS_ACCESS_KEY_ID'),
+        "AWS_SECRET_ACCESS_KEY": os.getenv('AWS_SECRET_ACCESS_KEY'),
+        "OPENAI_API_KEY": os.getenv('OPENAI_API_KEY'),
+        "CODING_AGENT_MODEL": os.getenv('CODING_AGENT_MODEL'),
+        "OPENAI_DIAGNOSIS_MODEL": os.getenv('OPENAI_DIAGNOSIS_MODEL'),
+        "OPENROUTER_API_KEY": os.getenv('OPENROUTER_API_KEY'),
+        "DEFAULT_OPENAI_MODEL": os.getenv('DEFAULT_OPENAI_MODEL'),
+        "EVAL_HELPER_MODEL": os.getenv('EVAL_HELPER_MODEL'),
+    }
+    
+    # Now create and start the container with environment variables
     container = build_dgm_container(
         client, root_dir, image_name, container_name,
         force_rebuild=force_rebuild,
+        environment=env_vars,
     )
     container.start()
 
@@ -336,20 +353,93 @@ def self_improve(
         save_metadata(metadata, output_dir)
         return metadata
 
+    # --- Start OpenRouter Diagnostic ---
+    safe_log("Running OpenRouter diagnostic script...")
+    diagnostic_script_content = """
+import os
+import openai
+import httpx # Ensure httpx is available to check version
+
+print("--- OpenRouter Diagnostic Script Start ---")
+
+# 1. Check for httpx version
+try:
+    print(f"httpx version: {httpx.__version__}")
+except Exception as e:
+    print(f"Error getting httpx version: {e}")
+
+# 2. Check API Key
+api_key = os.getenv("OPENROUTER_API_KEY")
+if api_key:
+    print(f"OPENROUTER_API_KEY is set (length: {len(api_key)}). First 5 chars: {api_key[:5] if len(api_key) > 5 else api_key}")
+else:
+    print("OPENROUTER_API_KEY is NOT SET.")
+    print("--- OpenRouter Diagnostic Script End (API Key Missing) ---")
+    exit(1) # Exit with error code if key is missing
+
+# 3. Attempt to create client and list models
+print("Attempting to create OpenRouter client and list models...")
+try:
+    client = openai.OpenAI(
+        api_key=api_key,
+        base_url="https://openrouter.ai/api/v1"
+    )
+    models_response = client.models.list()
+    print("Successfully listed models from OpenRouter.")
+    model_count = 0
+    # The response is a Paginator, iterate through its data
+    for model_data in models_response.data:
+        model_count +=1
+        if model_count <= 5: # Print first 5 models
+             print(f" - Model ID: {model_data.id}")
+    if model_count > 5:
+        print(f" ... and {model_count - 5} more models.")
+    elif model_count == 0:
+        print("No models returned from OpenRouter list endpoint.")
+
+except openai.APIConnectionError as e:
+    print(f"OpenAI APIConnectionError: {e}")
+    if hasattr(e, '__cause__') and e.__cause__:
+        print(f"  Cause: {e.__cause__}")
+except openai.APIStatusError as e:
+    print(f"OpenAI APIStatusError: Status Code: {e.status_code}, Response: {e.response.text if e.response else 'N/A'}")
+except openai.RateLimitError as e:
+    print(f"OpenAI RateLimitError: {e}")
+except openai.APIError as e: # Catching generic APIError
+    print(f"OpenAI APIError: {e}")
+except Exception as e:
+    print(f"An unexpected error occurred: {e}")
+    print(f"Error type: {type(e)}")
+
+print("--- OpenRouter Diagnostic Script End ---")
+"""
+    diagnostic_script_host_path = os.path.join(output_dir, "diagnose_openrouter.py")
+    with open(diagnostic_script_host_path, "w") as f:
+        f.write(diagnostic_script_content)
+    
+    diagnostic_script_container_path = "/dgm/diagnose_openrouter.py"
+    copy_to_container(container, diagnostic_script_host_path, diagnostic_script_container_path)
+    
+    safe_log(f"Executing diagnostic script in container: python {diagnostic_script_container_path}")
+    # Ensure env_vars are passed to the diagnostic script execution
+    diag_exec_result = container.exec_run(
+        ["python", diagnostic_script_container_path],
+        environment=env_vars,
+        workdir='/'
+    )
+    safe_log("Diagnostic script output:")
+    log_container_output(diag_exec_result) # Log its output
+
+    # Clean up diagnostic script from container
+    cleanup_diag_exec_result = container.exec_run(["rm", diagnostic_script_container_path], workdir='/')
+    safe_log("Cleaned up diagnostic script from container.")
+    log_container_output(cleanup_diag_exec_result)
+    safe_log("--- End OpenRouter Diagnostic ---")
+
     # Run self-improvement
     safe_log("Running self-improvement")
     chat_history_file_container = "/dgm/self_evo.md"
     test_description = get_test_description(swerepo=False)
-    env_vars = {
-        "ANTHROPIC_API_KEY": os.getenv('ANTHROPIC_API_KEY'),
-        "AWS_REGION": os.getenv('AWS_REGION'),
-        "AWS_REGION_NAME": os.getenv('AWS_REGION_NAME'),
-        "AWS_ACCESS_KEY_ID": os.getenv('AWS_ACCESS_KEY_ID'),
-        "AWS_SECRET_ACCESS_KEY": os.getenv('AWS_SECRET_ACCESS_KEY'),
-        "OPENAI_API_KEY": os.getenv('OPENAI_API_KEY'),
-        "CODING_AGENT_MODEL": os.getenv('CODING_AGENT_MODEL'),
-        "OPENAI_DIAGNOSIS_MODEL": os.getenv('OPENAI_DIAGNOSIS_MODEL'),
-    }
     cmd = [
         "timeout", "1800",  # 30min timeout
         "python", "/dgm/coding_agent.py",
