@@ -3,6 +3,10 @@ import datetime
 import json
 import os
 import docker
+from dotenv import load_dotenv
+
+# Load environment variables from .env file
+load_dotenv()
 
 from llm import create_client, get_response_from_llm, extract_json_between_markers
 from prompts.self_improvement_prompt import get_diagnose_prompt_polyglot, get_diagnose_prompt_swe, get_problem_description_prompt
@@ -343,6 +347,8 @@ def self_improve(
         "AWS_ACCESS_KEY_ID": os.getenv('AWS_ACCESS_KEY_ID'),
         "AWS_SECRET_ACCESS_KEY": os.getenv('AWS_SECRET_ACCESS_KEY'),
         "OPENAI_API_KEY": os.getenv('OPENAI_API_KEY'),
+        "CODING_AGENT_MODEL": os.getenv('CODING_AGENT_MODEL'),
+        "OPENAI_DIAGNOSIS_MODEL": os.getenv('OPENAI_DIAGNOSIS_MODEL'),
     }
     cmd = [
         "timeout", "1800",  # 30min timeout

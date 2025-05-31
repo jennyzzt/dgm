@@ -211,7 +211,8 @@ def get_response_from_llm(
     if msg_history is None:
         msg_history = []
 
-    if "claude" in model or model.startswith("anthropic/"):
+    if "claude" in model and not model.startswith("anthropic/"):
+        # Direct Anthropic API
         new_msg_history = msg_history + [
             {
                 "role": "user",
@@ -242,6 +243,22 @@ def get_response_from_llm(
                 ],
             }
         ]
+    elif model.startswith("anthropic/"):
+        # OpenRouter API for Anthropic models
+        new_msg_history = msg_history + [{"role": "user", "content": msg}]
+        response = client.chat.completions.create(
+            model=model,
+            messages=[
+                {"role": "system", "content": system_message},
+                *new_msg_history,
+            ],
+            temperature=temperature,
+            max_tokens=MAX_OUTPUT_TOKENS,
+            n=1,
+            stop=None,
+        )
+        content = response.choices[0].message.content
+        new_msg_history = new_msg_history + [{"role": "assistant", "content": content}]
     elif model.startswith("gpt-4o-") or model.startswith("openai/gpt-4o-"):
         new_msg_history = msg_history + [{"role": "user", "content": msg}]
         response = client.chat.completions.create(

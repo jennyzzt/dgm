@@ -11,7 +11,7 @@ from llm import create_client, get_response_from_llm
 from prompts.tooluse_prompt import get_tooluse_prompt
 from tools import load_all_tools
 
-CLAUDE_MODEL = os.getenv('CODING_AGENT_MODEL', 'bedrock/us.anthropic.claude-3-5-sonnet-20241022-v2:0')
+CLAUDE_MODEL = os.getenv('CODING_AGENT_MODEL', 'anthropic/claude-3.5-sonnet')
 OPENAI_MODEL = os.getenv('DEFAULT_OPENAI_MODEL', 'o3-mini-2025-01-31')
 
 def process_tool_call(tools_dict, tool_name, tool_input):
@@ -34,10 +34,37 @@ def get_response_withtools(
     logging=None, max_retry=3
 ):
     try:
-        if 'claude' in model or model.startswith('anthropic/'):
+        if 'claude' in model and not model.startswith('anthropic/'):
+            # Direct Anthropic API
             response = client.messages.create(
                 model=model,
                 messages=messages,
+                max_tokens=4096,
+                tool_choice=tool_choice,
+                tools=tools,
+            )
+        elif model.startswith('anthropic/'):
+            # OpenRouter API for Anthropic models - convert messages format
+            openai_messages = []
+            for msg in messages:
+                if isinstance(msg, dict):
+                    role = msg.get('role', 'user')
+                    content = msg.get('content', [])
+                    if isinstance(content, list):
+                        # Convert Claude format to OpenAI format
+                        text_content = ""
+                        for block in content:
+                            if isinstance(block, dict) and block.get('type') == 'text':
+                                text_content += block.get('text', '')
+                            elif hasattr(block, 'type') and block.type == 'text':
+                                text_content += getattr(block, 'text', '')
+                        openai_messages.append({"role": role, "content": text_content})
+                    else:
+                        openai_messages.append({"role": role, "content": str(content)})
+            
+            response = client.chat.completions.create(
+                model=model,
+                messages=openai_messages,
                 max_tokens=4096,
                 tool_choice=tool_choice,
                 tools=tools,
@@ -338,10 +365,12 @@ def chat_with_agent_manualtools(msg, model, msg_history=None, logging=print):
 
 def chat_with_agent_claude(
         msg,
-        model='bedrock/us.anthropic.claude-3-5-sonnet-20241022-v2:0',
+        model=None,
         msg_history=None,
         logging=print,
     ):
+    if model is None:
+        model = CLAUDE_MODEL
     # Construct message
     if msg_history is None:
         msg_history = []
@@ -367,11 +396,18 @@ def chat_with_agent_claude(
         tools = [convert_tool_info(tool['info'], model=client_model) for tool in all_tools]
 
         # Call API
+        if client_model.startswith('anthropic/'):
+            # OpenRouter uses "auto" instead of {"type": "auto"}
+            tool_choice_param = "auto"
+        else:
+            # Direct Anthropic API uses {"type": "auto"}
+            tool_choice_param = {"type": "auto"}
+            
         response = get_response_withtools(
             client=client,
             model=client_model,
             messages=msg_history + new_msg_history,
-            tool_choice={"type": "auto"},
+            tool_choice=tool_choice_param,
             tools=tools,
             logging=logging,
         )
@@ -400,7 +436,7 @@ def chat_with_agent_claude(
                 client=client,
                 model=client_model,
                 messages=msg_history + new_msg_history,
-                tool_choice={"type": "auto"},
+                tool_choice=tool_choice_param,
                 tools=tools,
                 logging=logging,
             )
