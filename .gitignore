@@ -3,6 +3,13 @@ __pycache__/
 .DS_Store
 venv/
 
+# Environment variables (API keys)
+.env
+
+# Memory bank and project intelligence (local context)
+memory-bank/
+.roo/
+
 logs/
 !initial/logs/
 swe_bench/predictions/
