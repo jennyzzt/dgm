@@ -71,14 +71,16 @@ def create_client(model: str):
         print(f"Using OpenRouter API with model {model}.")
         client = openai.OpenAI(
             api_key=os.environ["OPENROUTER_API_KEY"],
-            base_url="https://openrouter.ai/api/v1"
+            base_url="https://openrouter.ai/api/v1",
+            timeout=300.0  # 5 minutes timeout
         )
         return client, model
     elif model.startswith("openai/"):
         print(f"Using OpenRouter API with model {model}.")
         client = openai.OpenAI(
             api_key=os.environ["OPENROUTER_API_KEY"],
-            base_url="https://openrouter.ai/api/v1"
+            base_url="https://openrouter.ai/api/v1",
+            timeout=300.0  # 5 minutes timeout
         )
         return client, model
     elif model.startswith("bedrock") and "claude" in model:
@@ -108,7 +110,8 @@ def create_client(model: str):
         print(f"Using OpenRouter API with {model}.")
         client = openai.OpenAI(
             api_key=os.environ["OPENROUTER_API_KEY"],
-            base_url="https://openrouter.ai/api/v1"
+            base_url="https://openrouter.ai/api/v1",
+            timeout=300.0  # 5 minutes timeout
         )
         return client, model
     else:
@@ -246,19 +249,24 @@ def get_response_from_llm(
     elif model.startswith("anthropic/"):
         # OpenRouter API for Anthropic models
         new_msg_history = msg_history + [{"role": "user", "content": msg}]
-        response = client.chat.completions.create(
-            model=model,
-            messages=[
-                {"role": "system", "content": system_message},
-                *new_msg_history,
-            ],
-            temperature=temperature,
-            max_tokens=MAX_OUTPUT_TOKENS,
-            n=1,
-            stop=None,
-        )
-        content = response.choices[0].message.content
-        new_msg_history = new_msg_history + [{"role": "assistant", "content": content}]
+        try:
+            response = client.chat.completions.create(
+                model=model,
+                messages=[
+                    {"role": "system", "content": system_message},
+                    *new_msg_history,
+                ],
+                temperature=temperature,
+                max_tokens=MAX_OUTPUT_TOKENS,
+                n=1,
+                stop=None,
+            )
+            content = response.choices[0].message.content
+            new_msg_history = new_msg_history + [{"role": "assistant", "content": content}]
+        except Exception as e:
+            print(f"LLM.PY: Error during OpenRouter/Anthropic chat.completions.create: {type(e).__name__}: {e}")
+            # Potentially log to a more persistent file if needed, or ensure self_improve.log captures this stdout.
+            raise # Re-raise the exception to allow backoff to handle if applicable, or for the process to terminate.
     elif model.startswith("gpt-4o-") or model.startswith("openai/gpt-4o-"):
         new_msg_history = msg_history + [{"role": "user", "content": msg}]
         response = client.chat.completions.create(
