@@ -47,13 +47,12 @@ def any_exceeding_context_length(output_dir, commit_id, instance_ids):
             return True
     return False
 
-def choose_selfimproves(output_dir, archive, selfimprove_size, method='random', run_baseline=None, polyglot=False):
+def choose_selfimproves(output_dir, archive, selfimprove_size, fusion_probability, method='random', run_baseline=None, polyglot=False):
     """
     Choose self-improve attempts for the current generation.
+    May include single parent entries or two-parent fusion entries.
     """
     selfimprove_entries = []
-
-    # Get parent candidates
     candidates = {}
     for commit in archive:
         try:
@@ -75,77 +74,101 @@ def choose_selfimproves(output_dir, archive, selfimprove_size, method='random', 
             print(f"{commit} not eligible for being a parent: {e}")
             continue
 
-    # Choose parents based on method and baseline
-    if run_baseline == 'no_darwin':
-        # Always take the last commit
-        commits = list(candidates.keys())
-        parent_commits = commits[-1:]
-    elif method == 'score_prop':
-        # Choose parents based on score
-        commits = list(candidates.keys())
-        scores = [candidates[commit]['accuracy_score'] for commit in commits]
-        scores = [1 / (1 + math.exp(-10*(score-0.5))) for score in scores]
-        probabilities = [score / sum(scores) for score in scores]
-        print(commits)
-        parent_commits = random.choices(commits, probabilities, k=selfimprove_size)
-    elif method == 'score_child_prop':
-        # Choose parents based on score and the number of children
-        commits = list(candidates.keys())
-        scores = [candidates[commit]['accuracy_score'] for commit in commits]
-        scores = [1 / (1 + math.exp(-10*(score-0.5))) for score in scores]
-        children_counts = [candidates[commit]['children_count'] for commit in commits]
-        children_counts = [1 / (1 + count) for count in children_counts]
-        probabilities = [score * count for score, count in zip(scores, children_counts)]
-        probabilities = [prob / sum(probabilities) for prob in probabilities]
-        parent_commits = random.choices(commits, probabilities, k=selfimprove_size)
-    elif method == 'best':
-        # Choose parents with the best score
-        sorted_commits = sorted(candidates, key=lambda x: candidates[x]['accuracy_score'])
-        parent_commits = sorted_commits[:min(selfimprove_size, len(sorted_commits))]
-        if len(parent_commits) < selfimprove_size:
-            parent_commits.extend(random.choices(parent_commits, k=selfimprove_size - len(parent_commits)))
-    else:
-        # Choose parents randomly
-        parent_commits = random.choices(list(candidates.keys()), k=selfimprove_size)
+    candidate_commits_list = list(candidates.keys())
+    if not candidate_commits_list:
+        # No eligible parents, return empty list
+        return []
 
-    # Choose entries for each parent
-    for parent_commit in parent_commits:
-        empty_ids = candidates[parent_commit]['total_emptypatch_ids']
-        resolved_ids = candidates[parent_commit]['total_resolved_ids']
-        unresolved_ids = candidates[parent_commit]['total_unresolved_ids']
+    for _ in range(selfimprove_size):
+        attempt_fusion = random.random() < fusion_probability
         
-        if polyglot:
-            entry_ids = empty_ids + unresolved_ids
-            if not entry_ids:
-                entry_ids = resolved_ids + empty_ids + unresolved_ids
+        if attempt_fusion and len(candidate_commits_list) >= 2:
+            parent1, parent2 = random.sample(candidate_commits_list, 2)
+            selfimprove_entries.append(((parent1, parent2), "fuse_parents"))
+            continue # Move to next attempt
         else:
-            num_total_ids = len(empty_ids) + len(resolved_ids) + len(unresolved_ids)
-
-            # Solve empty patches
-            if len(empty_ids) >= 0.1 * num_total_ids and random.random() < 0.25:
-                entry = 'solve_empty_patches'
-                selfimprove_entries.append((parent_commit, entry))
+            # Single parent selection (or fallback if len(candidate_commits_list) < 2)
+            if not candidate_commits_list:
                 continue
 
-            # Solve stochasticity
-            if random.random() < 0.25:
-                entry = 'solve_stochasticity'
-                selfimprove_entries.append((parent_commit, entry))
+            parent_commit = None
+            if run_baseline == 'no_darwin':
+                parent_commit = candidate_commits_list[-1] # Always take the last commit
+            elif method == 'score_prop':
+                scores = [candidates[c]['accuracy_score'] for c in candidate_commits_list]
+                # Sigmoid scaling for scores
+                scaled_scores = [1 / (1 + math.exp(-10*(score-0.5))) for score in scores]
+                if sum(scaled_scores) == 0: # Avoid division by zero if all scaled scores are 0
+                    parent_commit = random.choice(candidate_commits_list)
+                else:
+                    probabilities = [s / sum(scaled_scores) for s in scaled_scores]
+                    parent_commit = random.choices(candidate_commits_list, probabilities, k=1)[0]
+            elif method == 'score_child_prop':
+                scores = [candidates[c]['accuracy_score'] for c in candidate_commits_list]
+                scaled_scores = [1 / (1 + math.exp(-10*(score-0.5))) for score in scores]
+                children_counts = [candidates[c]['children_count'] for c in candidate_commits_list]
+                # Inverse of children count (add 1 to avoid division by zero and to give less weight to more children)
+                child_weights = [1 / (1 + count) for count in children_counts]
+
+                combined_weights = [s * cw for s, cw in zip(scaled_scores, child_weights)]
+                if sum(combined_weights) == 0:
+                    parent_commit = random.choice(candidate_commits_list)
+                else:
+                    probabilities = [w / sum(combined_weights) for w in combined_weights]
+                    parent_commit = random.choices(candidate_commits_list, probabilities, k=1)[0]
+            elif method == 'best':
+                # Sort by accuracy_score descending and pick the top one.
+                # This means if multiple single-parent entries are made, they might all use the same best parent.
+                parent_commit = sorted(candidate_commits_list, key=lambda c: candidates[c]['accuracy_score'], reverse=True)[0]
+            else: # 'random' or default
+                parent_commit = random.choice(candidate_commits_list)
+
+            if parent_commit is None: # Should ideally not happen if candidate_commits_list is not empty
                 continue
 
-            # Solve context length
-            if any_exceeding_context_length(output_dir, parent_commit, empty_ids + unresolved_ids) and \
-                random.random() < 0.25:
-                entry = 'solve_contextlength'
-                selfimprove_entries.append((parent_commit, entry))
+            empty_ids = candidates[parent_commit]['total_emptypatch_ids']
+            resolved_ids = candidates[parent_commit]['total_resolved_ids']
+            unresolved_ids = candidates[parent_commit]['total_unresolved_ids']
+
+            if polyglot:
+                entry_ids = empty_ids + unresolved_ids
+                if not entry_ids:
+                    entry_ids = resolved_ids + empty_ids + unresolved_ids
+            else:
+                num_total_ids = len(empty_ids) + len(resolved_ids) + len(unresolved_ids)
+                if len(empty_ids) >= 0.1 * num_total_ids and random.random() < 0.25:
+                    entry = 'solve_empty_patches'
+                    selfimprove_entries.append((parent_commit, entry))
+                    continue
+                if random.random() < 0.25:
+                    entry = 'solve_stochasticity'
+                    selfimprove_entries.append((parent_commit, entry))
+                    continue
+                if any_exceeding_context_length(output_dir, parent_commit, empty_ids + unresolved_ids) and \
+                    random.random() < 0.25:
+                    entry = 'solve_contextlength'
+                    selfimprove_entries.append((parent_commit, entry))
+                    continue
+                if not unresolved_ids: # Renamed from unresolved_ids == 0 for clarity
+                    # If no specific entry type chosen and no unresolved, what to do?
+                    # Maybe pick from resolved_ids or skip this parent for this iteration?
+                    # For now, if no unresolved, we might not add an entry, leading to fewer than selfimprove_size.
+                    # This needs to be handled: either ensure an entry or adjust loop.
+                    # Current original code has `continue` if unresolved_ids == 0, which means
+                    # it might also produce fewer than selfimprove_size entries.
+                    # Let's keep that behavior for now.
+                    if not (empty_ids + resolved_ids + unresolved_ids): # if truly no tasks at all
+                        continue # skip this parent
+                    entry_ids = unresolved_ids if unresolved_ids else (empty_ids + resolved_ids)
+
+
+            if not entry_ids: # If after all logic, entry_ids is still empty (e.g. polyglot case with no tasks)
+                # This case should ideally be prevented by ensuring 'candidates' only includes those with tasks,
+                # or by having a default task. For now, skip adding an entry.
                 continue
 
-            # Choose a random unresolved entry
-            if unresolved_ids == 0:
-                continue
-            entry_ids = unresolved_ids
-        entry = random.choice(entry_ids)
-        selfimprove_entries.append((parent_commit, entry))
+            entry = random.choice(entry_ids)
+            selfimprove_entries.append((parent_commit, entry))
 
     return selfimprove_entries
 
@@ -237,8 +260,9 @@ def main():
     parser.add_argument("--polyglot", default=False, action='store_true', help="Run single shallow evaluation for self-improvement on swe.")
     parser.add_argument("--eval_noise", type=float, default=0.1, help="Noise leeway for evaluation.")
     parser.add_argument("--no_full_eval", default=False, action='store_true', help="Do not run full evaluation on swe if a node is the top N highest performing.")
-    # baselines
+    # baselines # Use a more descriptive name for the argument for clarity.
     parser.add_argument("--run_baseline", type=str, default=None, choices=['no_selfimprove', 'no_darwin'], help="Baseline to run.")
+    parser.add_argument("--fusion_probability", type=float, default=0.25, help="Probability of attempting a two-parent fusion.")
     args = parser.parse_args()
 
     # Variables for this DGM run
@@ -271,6 +295,7 @@ def main():
         # Choose self-improve attempts
         selfimprove_entries = choose_selfimproves(
             output_dir, archive, args.selfimprove_size,
+            args.fusion_probability, # Pass the new argument
             method=args.choose_selfimproves_method,
             run_baseline=args.run_baseline,
             polyglot=args.polyglot,

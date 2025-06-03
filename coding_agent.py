@@ -74,14 +74,27 @@ class AgenticSystem:
             test_description=None,
             self_improve=False,
             instance_id=None,
+            # Fusion task specific arguments
+            is_fusion_task=False,
+            parent1_patch_file=None,
+            parent2_patch_file=None,
+            parent1_commit_id=None,
+            parent2_commit_id=None
         ):
         self.problem_statement = problem_statement
         self.git_tempdir = git_tempdir
-        self.base_commit = base_commit
+        self.base_commit = base_commit # This is the SHA of the common ancestor for fusion
         self.chat_history_file = chat_history_file
         self.test_description = test_description
         self.self_improve = self_improve
         self.instance_id = instance_id if not self_improve else 'dgm'
+
+        self.is_fusion_task = is_fusion_task
+        self.parent1_patch_file = parent1_patch_file
+        self.parent2_patch_file = parent2_patch_file
+        self.parent1_commit_id = parent1_commit_id
+        self.parent2_commit_id = parent2_commit_id
+
         self.code_model = CLAUDE_MODEL
 
         # Initialize logger and store it in thread-local storage
@@ -154,7 +167,34 @@ Your task is to run the regression tests in the {self.git_tempdir} directory to 
         """
         The forward function for the AgenticSystem.
         """
-        instruction = f"""I have uploaded a Python code repository in the directory {self.git_tempdir}. Help solve the following problem.
+        if self.is_fusion_task:
+            self.logger.info("Fusion task detected.")
+            try:
+                with open(self.parent1_patch_file, 'r') as f:
+                    parent1_patch_content = f.read()
+                with open(self.parent2_patch_file, 'r') as f:
+                    parent2_patch_content = f.read()
+            except FileNotFoundError as e:
+                self.logger.error(f"Error: Parent patch file not found: {e}. This will result in an empty patch.")
+                # Allow to proceed, will result in an empty diff as no chat_with_agent call
+                return # Exit early, no instruction to run
+
+            # Dynamically import here to avoid issues if this file is imported elsewhere
+            # where prompts.fusion_prompt might not be immediately available or needed.
+            from prompts.fusion_prompt import get_fusion_prompt
+
+            instruction = get_fusion_prompt(
+                base_commit_id=self.base_commit, # base_commit is the SHA of the common ancestor
+                parent1_commit_id=self.parent1_commit_id,
+                parent1_patch_content=parent1_patch_content,
+                parent2_commit_id=self.parent2_commit_id,
+                parent2_patch_content=parent2_patch_content,
+                existing_problem_statement=self.problem_statement # Original problem statement for context
+            )
+            self.logger.info(f"Fusion instruction generated for base {self.base_commit}, P1 {self.parent1_commit_id}, P2 {self.parent2_commit_id}")
+        else:
+            self.logger.info("Standard task detected.")
+            instruction = f"""I have uploaded a Python code repository in the directory {self.git_tempdir}. Help solve the following problem.
 
 <problem_description>
 {self.problem_statement}
@@ -166,6 +206,7 @@ Your task is to run the regression tests in the {self.git_tempdir} directory to 
 
 Your task is to make changes to the files in the {self.git_tempdir} directory to address the <problem_description>. I have already taken care of the required dependencies.
 """
+        self.logger.info(f"Instruction for chat_with_agent (first 200 chars):\n{instruction[:200]}...")
         new_msg_history = chat_with_agent(instruction, model=self.code_model, msg_history=[], logging=safe_log)
 
 def main():
@@ -178,7 +219,18 @@ def main():
     parser.add_argument('--test_description', default=None, required=False, help='Description of how to test the repository')
     parser.add_argument('--self_improve', default=False, action='store_true', help='Whether to self-improve the repository or solving swe')
     parser.add_argument('--instance_id', default=None, help='Instance ID for SWE issue')
+
+    # Arguments for fusion task
+    parser.add_argument("--is_fusion_task", default=False, action="store_true", help="Indicates if the task is a fusion of two parents.")
+    parser.add_argument("--parent1_patch_file", type=str, default=None, help="Path to the diff file for Parent 1 (changes from base to P1). Required if is_fusion_task is True.")
+    parser.add_argument("--parent2_patch_file", type=str, default=None, help="Path to the diff file for Parent 2 (changes from base to P2). Required if is_fusion_task is True.")
+    parser.add_argument("--parent1_commit_id", type=str, default="Parent1", help="Commit ID for Parent 1 (for prompt context).")
+    parser.add_argument("--parent2_commit_id", type=str, default="Parent2", help="Commit ID for Parent 2 (for prompt context).")
+
     args = parser.parse_args()
+
+    if args.is_fusion_task and (not args.parent1_patch_file or not args.parent2_patch_file):
+        parser.error("--parent1_patch_file and --parent2_patch_file are required when --is_fusion_task is True.")
 
     # Process the repository
     agentic_system = AgenticSystem(
@@ -189,6 +241,12 @@ def main():
         test_description=args.test_description,
         self_improve=args.self_improve,
         instance_id=args.instance_id,
+        # Fusion arguments
+        is_fusion_task=args.is_fusion_task,
+        parent1_patch_file=args.parent1_patch_file,
+        parent2_patch_file=args.parent2_patch_file,
+        parent1_commit_id=args.parent1_commit_id,
+        parent2_commit_id=args.parent2_commit_id
     )
 
     # Run the agentic system to try to solve the problem
