@@ -5,6 +5,10 @@ import math
 import os
 import random
 from concurrent.futures import ThreadPoolExecutor, ProcessPoolExecutor, as_completed, TimeoutError
+from dotenv import load_dotenv
+
+# Load environment variables from .env file
+load_dotenv()
 
 from prompts.self_improvement_prompt import find_selfimprove_eval_logs
 from self_improve_step import self_improve

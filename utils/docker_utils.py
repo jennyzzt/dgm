@@ -107,9 +107,18 @@ def build_dgm_container(
         image_name='app',
         container_name='app-container',
         force_rebuild=False,
+        environment=None,
     ):
     """
     Build the Docker image for the dgm app and start a container from it.
+    
+    Args:
+        client: Docker client
+        repo_path: Path to repository
+        image_name: Name for Docker image
+        container_name: Name for Docker container
+        force_rebuild: Whether to force rebuild the image
+        environment: Dictionary of environment variables to pass to container
     """
     try:
         # Build the Docker image if force_rebuild is set or the image doesn't exist
@@ -129,8 +138,16 @@ def build_dgm_container(
         return None
 
     try:
-        # Run the container
-        container = client.containers.run(image=image_name, name=container_name, detach=True)
+        # Run the container with environment variables if provided
+        container_kwargs = {
+            'image': image_name,
+            'name': container_name,
+            'detach': True
+        }
+        if environment:
+            container_kwargs['environment'] = environment
+            
+        container = client.containers.run(**container_kwargs)
         safe_log(f"Container '{container_name}' started successfully.")
         return container
     except Exception as e:

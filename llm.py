@@ -10,6 +10,7 @@ import openai
 MAX_OUTPUT_TOKENS = 4096
 AVAILABLE_LLMS = [
     # Anthropic models
+    "claude-sonnet-4",
     "claude-3-5-sonnet-20240620",
     "claude-3-5-sonnet-20241022",
     # OpenAI models
@@ -20,7 +21,21 @@ AVAILABLE_LLMS = [
     "o1-mini-2024-09-12",
     "o1-2024-12-17",
     "o3-mini-2025-01-31",
-    # OpenRouter models
+    # OpenRouter models (Anthropic)
+    "anthropic/claude-sonnet-4",
+    "anthropic/claude-3-5-sonnet-20241022",
+    "anthropic/claude-3-5-sonnet-20240620",
+    "anthropic/claude-3-haiku-20240307",
+    "anthropic/claude-3-opus-20240229",
+    # OpenRouter models (OpenAI)
+    "openai/gpt-4o-mini-2024-07-18",
+    "openai/gpt-4o-2024-05-13",
+    "openai/gpt-4o-2024-08-06",
+    "openai/o1-preview-2024-09-12",
+    "openai/o1-mini-2024-09-12",
+    "openai/o1-2024-12-17",
+    "openai/o3-mini-2025-01-31",
+    # OpenRouter models (Other)
     "llama3.1-405b",
     # Anthropic Claude models via Amazon Bedrock
     "bedrock/anthropic.claude-3-sonnet-20240229-v1:0",
@@ -52,6 +67,22 @@ def create_client(model: str):
     if model.startswith("claude-"):
         print(f"Using Anthropic API with model {model}.")
         return anthropic.Anthropic(), model
+    elif model.startswith("anthropic/"):
+        print(f"Using OpenRouter API with model {model}.")
+        client = openai.OpenAI(
+            api_key=os.environ["OPENROUTER_API_KEY"],
+            base_url="https://openrouter.ai/api/v1",
+            timeout=300.0  # 5 minutes timeout
+        )
+        return client, model
+    elif model.startswith("openai/"):
+        print(f"Using OpenRouter API with model {model}.")
+        client = openai.OpenAI(
+            api_key=os.environ["OPENROUTER_API_KEY"],
+            base_url="https://openrouter.ai/api/v1",
+            timeout=300.0  # 5 minutes timeout
+        )
+        return client, model
     elif model.startswith("bedrock") and "claude" in model:
         client_model = model.split("/")[-1]
         print(f"Using Amazon Bedrock with model {client_model}.")
@@ -76,11 +107,13 @@ def create_client(model: str):
         )
         return client, model
     elif model == "llama3.1-405b":
-        print(f"Using OpenAI API with {model}.")
+        print(f"Using OpenRouter API with {model}.")
         client = openai.OpenAI(
             api_key=os.environ["OPENROUTER_API_KEY"],
-            base_url="https://openrouter.ai/api/v1"
-        ), model
+            base_url="https://openrouter.ai/api/v1",
+            timeout=300.0  # 5 minutes timeout
+        )
+        return client, model
     else:
         raise ValueError(f"Model {model} not supported.")
 
@@ -181,7 +214,8 @@ def get_response_from_llm(
     if msg_history is None:
         msg_history = []
 
-    if "claude" in model:
+    if "claude" in model and not model.startswith("anthropic/"):
+        # Direct Anthropic API
         new_msg_history = msg_history + [
             {
                 "role": "user",
@@ -212,7 +246,28 @@ def get_response_from_llm(
                 ],
             }
         ]
-    elif model.startswith("gpt-4o-"):
+    elif model.startswith("anthropic/"):
+        # OpenRouter API for Anthropic models
+        new_msg_history = msg_history + [{"role": "user", "content": msg}]
+        try:
+            response = client.chat.completions.create(
+                model=model,
+                messages=[
+                    {"role": "system", "content": system_message},
+                    *new_msg_history,
+                ],
+                temperature=temperature,
+                max_tokens=MAX_OUTPUT_TOKENS,
+                n=1,
+                stop=None,
+            )
+            content = response.choices[0].message.content
+            new_msg_history = new_msg_history + [{"role": "assistant", "content": content}]
+        except Exception as e:
+            print(f"LLM.PY: Error during OpenRouter/Anthropic chat.completions.create: {type(e).__name__}: {e}")
+            # Potentially log to a more persistent file if needed, or ensure self_improve.log captures this stdout.
+            raise # Re-raise the exception to allow backoff to handle if applicable, or for the process to terminate.
+    elif model.startswith("gpt-4o-") or model.startswith("openai/gpt-4o-"):
         new_msg_history = msg_history + [{"role": "user", "content": msg}]
         response = client.chat.completions.create(
             model=model,
@@ -228,7 +283,7 @@ def get_response_from_llm(
         )
         content = response.choices[0].message.content
         new_msg_history = new_msg_history + [{"role": "assistant", "content": content}]
-    elif model.startswith("o1-") or model.startswith("o3-"):
+    elif model.startswith("o1-") or model.startswith("o3-") or model.startswith("openai/o1-") or model.startswith("openai/o3-"):
         new_msg_history = msg_history + [{"role": "user", "content": system_message + msg}]
         response = client.chat.completions.create(
             model=model,
