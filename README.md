@@ -59,7 +59,7 @@ cd ../../
 
 # Prepare Polyglot
 # Make sure git is properly configured in your environment with username and email
-python polyglot/prepare_polyglot_dataset.py
+python -m polyglot.prepare_polyglot_dataset
 ```
 
 ## Running the DGM

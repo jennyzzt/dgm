@@ -314,8 +314,8 @@ def get_diagnose_prompt_swe(entry_id, commit, root_dir, out_dir, dataset, patch_
         diagnose_prompt_out = diagnose_prompt_contextlength
     else:
         # Get user prompt for the entry
-        md_logs, eval_logs, predicted_patches = find_selfimprove_eval_logs(entry_id, out_dir, commit_id=commit)
-        md_log, eval_log, predicted_patch = process_selfimprove_eval_logs(md_logs, eval_logs, predicted_patches)
+        md_logs, eval_logs, predicted_patches, eval_results = find_selfimprove_eval_logs(entry_id, out_dir, commit_id=commit)
+        md_log, eval_log, predicted_patch, eval_result = process_selfimprove_eval_logs(md_logs, eval_logs, predicted_patches, eval_results)
         entry = next((e for e in dataset if e['instance_id'] == entry_id), None)
         answer_patch = entry['patch']
         test_patch = entry['test_patch']
