@@ -1,3 +1,6 @@
+***In-progress adaptation of DGM research. Original repo/paper found below.***
+
+
 <h1 align="center">
     Darwin Gödel Machine:<br/>Open-Ended Evolution of Self-Improving Agents
 </h1>
