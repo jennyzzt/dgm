@@ -254,7 +254,25 @@ def self_improve(
     output_dir = os.path.join(root_dir, f"{output_dir}/{run_id}/")
     os.makedirs(output_dir, exist_ok=True)
     metadata['run_id'] = run_id
-    metadata['parent_commit'] = parent_commit
+
+    is_fusion = isinstance(parent_commit, tuple)
+    base_commit = 'initial' # Hardcoded for now as per requirements
+
+    if is_fusion:
+        if entry != "fuse_parents":
+            # This case should ideally not happen if DGM_outer.py is correct
+            safe_log("Warning: parent_commit is a tuple, but entry is not 'fuse_parents'. Proceeding as fusion.")
+        parent1_commit, parent2_commit = parent_commit
+        metadata['parent_commits'] = [parent1_commit, parent2_commit]
+        metadata['base_commit'] = base_commit
+        metadata['parent_commit'] = None # Nullify to avoid confusion
+        primary_parent_commit_for_patches = base_commit # Patches for agent are from base_commit
+        safe_log(f"Fusion mode: Parent1={parent1_commit}, Parent2={parent2_commit}, Base={base_commit}")
+    else:
+        metadata['parent_commit'] = parent_commit
+        primary_parent_commit_for_patches = parent_commit # Patches from this parent
+        safe_log(f"Single parent mode: Parent={parent_commit}")
+
     test_task_list_big = load_json_file("./swe_bench/subsets/big.json")
 
     # Set up logger
@@ -290,9 +308,24 @@ def self_improve(
         exec_result = container.exec_run("rm /dgm/coding_agent_polyglot.py", workdir='/')
 
     # Find all parent patches and apply them
-    patch_files = get_model_patch_paths(root_dir, os.path.join(output_dir, '../'), parent_commit)
+    # If fusion, the agent works from base_commit, so no prior patches are applied to bring it to parent1 or parent2.
+    # The agent will be *aware* of parent1 and parent2's patches.
+    # If not fusion, patches are applied to bring it to parent_commit's state.
+    if is_fusion:
+        patch_files = [] # Container starts from base_commit state for fusion agent
+        # However, we need to know the patches for Parent1 and Parent2 for the agent
+        # get_model_patch_paths always traces back to 'initial', which is our current base_commit.
+        patch_files_parent1 = get_model_patch_paths(root_dir, os.path.join(output_dir, '../'), parent1_commit)
+        patch_files_parent2 = get_model_patch_paths(root_dir, os.path.join(output_dir, '../'), parent2_commit)
+        metadata['patch_files_parent1'] = patch_files_parent1
+        metadata['patch_files_parent2'] = patch_files_parent2
+        safe_log(f"Patch files for Parent1 (from {base_commit}): {patch_files_parent1}")
+        safe_log(f"Patch files for Parent2 (from {base_commit}): {patch_files_parent2}")
+    else:
+        patch_files = get_model_patch_paths(root_dir, os.path.join(output_dir, '../'), primary_parent_commit_for_patches)
+
     if run_baseline not in ['no_selfimprove']:
-        for patch_file in patch_files:
+        for patch_file in patch_files: # These are only applied if not fusion.
             copy_to_container(container, patch_file, '/dgm/parent_patch.txt')
             exec_result = container.exec_run("/bin/sh -c 'patch -p1 < /dgm/parent_patch.txt'", workdir='/dgm')
             log_container_output(exec_result)
@@ -300,6 +333,8 @@ def self_improve(
             log_container_output(exec_result)
 
     # Commit this version of dgm, so that irrelevant changes are not included in the patch
+    # This commit represents the state the agent will start working from.
+    # For fusion, this is base_commit. For single parent, this is parent_commit.
     exec_result = container.exec_run("git add --all", workdir='/dgm/')
     log_container_output(exec_result)
     exec_result = container.exec_run("git -c user.name='user' -c user.email='you@example.com' commit -m 'a nonsense commit message'", workdir='/dgm/')
@@ -313,9 +348,20 @@ def self_improve(
     log_container_output(exec_result)
 
     # Get tasks to improve
-    if entry:
+    if is_fusion and entry == "fuse_parents":
+        problem_statement = (
+            f"Fuse features from Parent1 ({parent1_commit}) and Parent2 ({parent2_commit}) "
+            f"based on the common ancestor ({base_commit})."
+        )
+        metadata['problem_statement_type'] = "fusion_predefined"
+        safe_log(f"Fusion task problem statement: {problem_statement}")
+    elif entry:
         safe_log(f"Task to improve: {entry}")
-        problem_statement = diagnose_problem(entry, parent_commit, root_dir, out_dir_base, patch_files=patch_files, polyglot=polyglot)
+        # For diagnose_problem, use the actual single parent commit if not fusion,
+        # or parent1 if fusion (though problem_statement is predefined for fusion, this call might be skipped or adapted)
+        diagnose_parent_ref = parent1_commit if is_fusion else parent_commit
+        problem_statement = diagnose_problem(entry, diagnose_parent_ref, root_dir, out_dir_base, patch_files=patch_files, polyglot=polyglot)
+        metadata['problem_statement_type'] = "diagnosed"
         safe_log(f"problem_statement: {problem_statement}")
     else:
         safe_log("No entry provided. Exiting.")
@@ -333,58 +379,156 @@ def self_improve(
         return metadata
 
     # Run self-improvement
-    safe_log("Running self-improvement")
-    chat_history_file_container = "/dgm/self_evo.md"
-    test_description = get_test_description(swerepo=False)
-    env_vars = {
-        "ANTHROPIC_API_KEY": os.getenv('ANTHROPIC_API_KEY'),
-        "AWS_REGION": os.getenv('AWS_REGION'),
-        "AWS_REGION_NAME": os.getenv('AWS_REGION_NAME'),
-        "AWS_ACCESS_KEY_ID": os.getenv('AWS_ACCESS_KEY_ID'),
-        "AWS_SECRET_ACCESS_KEY": os.getenv('AWS_SECRET_ACCESS_KEY'),
-        "OPENAI_API_KEY": os.getenv('OPENAI_API_KEY'),
-    }
-    cmd = [
-        "timeout", "1800",  # 30min timeout
-        "python", "/dgm/coding_agent.py",
-        "--problem_statement", problem_statement,
-        "--git_dir", "/dgm/",
-        "--chat_history_file", chat_history_file_container,
-        "--base_commit", commit_hash,
-        "--outdir", "/dgm/",
-        "--test_description", test_description,
-        "--self_improve",
-    ]
-    exec_result = container.exec_run(cmd, environment=env_vars, workdir='/')
-    log_container_output(exec_result)
+    model_patch_file = os.path.join(output_dir, "model_patch.diff") # Define early for cleanup
+    model_patch_generated = False
 
-    # Copy output files back to host
-    chat_history_file = os.path.join(output_dir, "self_evo.md")
-    copy_from_container(container, chat_history_file_container, chat_history_file)
-    model_patch_file = os.path.join(output_dir, "model_patch.diff")
-    copy_from_container(container, "/dgm/model_patch.diff", model_patch_file)
+    if is_fusion and entry == "fuse_parents":
+        safe_log(f"Fusion mode: Preparing to call coding_agent.py for fusion. Base commit in container: {commit_hash}")
 
-    # Try reading the patch file to validate it
-    try:
-        # Check if patch file exists and is not empty
-        if not os.path.exists(model_patch_file):
-            raise Exception("Model patch file is empty or does not exist")
-        with open(model_patch_file, 'r') as f:
-            patch_content = f.read()
-            if not patch_content.strip():
-                raise Exception("Model patch file is empty")
-    except Exception as e:
-        safe_log(f"Failed to read model patch file: {str(e)}")
-        save_metadata(metadata, output_dir)
-        return metadata
+        # 1. Create concatenated diff files for parent1 and parent2
+        host_p1_diff_path = os.path.join(output_dir, "parent1_for_fusion.diff")
+        p1_content = []
+        for p_file in metadata.get('patch_files_parent1', []):
+            try:
+                with open(p_file, 'r') as f:
+                    p1_content.append(f.read())
+            except FileNotFoundError:
+                safe_log(f"Warning: Patch file {p_file} for parent1 not found. Skipping.")
+        with open(host_p1_diff_path, 'w') as f:
+            f.write("\n".join(p1_content))
 
-    patch_files.append(model_patch_file)
+        host_p2_diff_path = os.path.join(output_dir, "parent2_for_fusion.diff")
+        p2_content = []
+        for p_file in metadata.get('patch_files_parent2', []):
+            try:
+                with open(p_file, 'r') as f:
+                    p2_content.append(f.read())
+            except FileNotFoundError:
+                safe_log(f"Warning: Patch file {p_file} for parent2 not found. Skipping.")
+        with open(host_p2_diff_path, 'w') as f:
+            f.write("\n".join(p2_content))
+
+        # 2. Define container paths and copy these diff files to the container
+        container_p1_diff_path = "/tmp/parent1_for_fusion.diff"
+        container_p2_diff_path = "/tmp/parent2_for_fusion.diff"
+        copy_to_container(container, host_p1_diff_path, container_p1_diff_path)
+        copy_to_container(container, host_p2_diff_path, container_p2_diff_path)
+
+        # 3. Construct command for coding_agent.py
+        chat_history_file_container = "/dgm/self_evo_fusion.md" # Specific for fusion
+        env_vars = {
+            "ANTHROPIC_API_KEY": os.getenv('ANTHROPIC_API_KEY'),
+            "AWS_REGION": os.getenv('AWS_REGION'),
+            "AWS_REGION_NAME": os.getenv('AWS_REGION_NAME'),
+            "AWS_ACCESS_KEY_ID": os.getenv('AWS_ACCESS_KEY_ID'),
+            "AWS_SECRET_ACCESS_KEY": os.getenv('AWS_SECRET_ACCESS_KEY'),
+            "OPENAI_API_KEY": os.getenv('OPENAI_API_KEY'),
+        }
+        cmd = [
+            "timeout", "3600",  # Increased timeout for potentially complex fusion task (1hr)
+            "python", "/dgm/coding_agent.py",
+            "--problem_statement", problem_statement, # Predefined fusion problem statement
+            "--git_dir", "/dgm/",
+            "--chat_history_file", chat_history_file_container,
+            "--base_commit", commit_hash, # SHA of 'initial' state in container
+            "--outdir", "/dgm/",
+            # Fusion specific arguments
+            "--is_fusion_task",
+            "--parent1_commit_id", parent1_commit,
+            "--parent2_commit_id", parent2_commit,
+            "--parent1_patch_file", container_p1_diff_path,
+            "--parent2_patch_file", container_p2_diff_path,
+            # --test_description might not be directly relevant for fusion prompt, but good to pass
+            "--test_description", get_test_description(swerepo=False),
+            "--self_improve" # Keep self_improve flag if it influences agent behavior generally
+        ]
+
+        safe_log(f"Executing fusion command: {' '.join(cmd)}")
+        exec_result = container.exec_run(cmd, environment=env_vars, workdir='/')
+        log_container_output(exec_result)
+
+        # Copy output files (model_patch.diff, chat history) back to host
+        chat_history_file = os.path.join(output_dir, "self_evo_fusion.md")
+        copy_from_container(container, chat_history_file_container, chat_history_file)
+        copy_from_container(container, "/dgm/model_patch.diff", model_patch_file)
+        model_patch_generated = True
+
+    elif problem_statement: # Proceed only if we have a problem statement (and not fusion)
+        safe_log("Running self-improvement (single parent mode)")
+        chat_history_file_container = "/dgm/self_evo.md" # Standard chat history file
+        test_description = get_test_description(swerepo=False)
+        env_vars = {
+            "ANTHROPIC_API_KEY": os.getenv('ANTHROPIC_API_KEY'),
+            "AWS_REGION": os.getenv('AWS_REGION'),
+            "AWS_REGION_NAME": os.getenv('AWS_REGION_NAME'),
+            "AWS_ACCESS_KEY_ID": os.getenv('AWS_ACCESS_KEY_ID'),
+            "AWS_SECRET_ACCESS_KEY": os.getenv('AWS_SECRET_ACCESS_KEY'),
+            "OPENAI_API_KEY": os.getenv('OPENAI_API_KEY'),
+        }
+        # TODO: For fusion, coding_agent.py will need different/additional arguments
+        # like parent1_commit, parent2_commit, base_commit, and paths to their respective patches/code.
+        cmd = [
+            "timeout", "1800",  # 30min timeout
+            "python", "/dgm/coding_agent.py",
+            "--problem_statement", problem_statement,
+            "--git_dir", "/dgm/",
+            "--chat_history_file", chat_history_file_container,
+            "--base_commit", commit_hash, # This is hash of (base_commit + patch_files) state
+            "--outdir", "/dgm/",
+            "--test_description", test_description,
+            "--self_improve",
+        ]
+        exec_result = container.exec_run(cmd, environment=env_vars, workdir='/')
+        log_container_output(exec_result)
+
+        # Copy output files back to host
+        chat_history_file = os.path.join(output_dir, "self_evo.md")
+        copy_from_container(container, chat_history_file_container, chat_history_file)
+        copy_from_container(container, "/dgm/model_patch.diff", model_patch_file)
+        model_patch_generated = True
+    else:
+        safe_log("Skipping self-improvement agent call due to missing problem statement or other reasons.")
+
+    if model_patch_generated:
+        try:
+            # Check if patch file exists and is not empty
+            if not os.path.exists(model_patch_file):
+                raise Exception("Model patch file is empty or does not exist")
+            with open(model_patch_file, 'r') as f:
+                patch_content = f.read()
+                if not patch_content.strip():
+                    raise Exception("Model patch file is empty")
+            patch_files.append(model_patch_file) # Add successfully generated patch to list for evaluation
+        except Exception as e:
+            safe_log(f"Failed to read or validate model patch file: {str(e)}")
+            model_patch_generated = False # Mark as not generated if checks fail
+            # Do not return yet, proceed to cleanup and save metadata
+
+    # Patch files for evaluation harness:
+    # For fusion, it's just the new model_patch.diff (applied to 'initial').
+    # For non-fusion, it's the chain of parent patches + new model_patch.diff.
+    eval_patch_files = []
+    if is_fusion:
+        if model_patch_generated and os.path.exists(model_patch_file) and os.path.getsize(model_patch_file) > 0:
+            eval_patch_files = [model_patch_file]
+            safe_log(f"Fusion successful: using {model_patch_file} for evaluation.")
+        else:
+            safe_log("Fusion generated an empty or missing patch. Evaluation will run on base_commit state.")
+            # eval_patch_files remains empty, harness runs on 'initial'
+    else: # Non-fusion
+        eval_patch_files = patch_files # These are patches leading up to current parent
+        if model_patch_generated and os.path.exists(model_patch_file) and os.path.getsize(model_patch_file) > 0:
+            eval_patch_files.append(model_patch_file)
+            safe_log(f"Self-improve (single parent) successful: using {model_patch_file} on top of parent patches for evaluation.")
+        else:
+            safe_log("Self-improve (single parent) generated an empty or missing patch. Evaluation will run on parent state.")
+
 
     # Stop and remove the container
     cleanup_container(container)
 
     # Evaluate the performance of the self-improvement
-    model_patch_exists = os.path.exists(model_patch_file)
+    model_patch_exists = os.path.exists(model_patch_file) and model_patch_generated
     metadata['model_patch_exists'] = model_patch_exists
     model_patch_notempty = os.path.getsize(model_patch_file) > 0
     metadata['model_patch_notempty'] = model_patch_notempty
@@ -401,16 +545,29 @@ def self_improve(
     # Post-self-improvement diagnosis
     if post_improve_diagnose:
         safe_log("Diagnosing the self-improvement")
-        metadata['is_compiled'] = is_compiled_self_improve(metadata)
-        if metadata['is_compiled']:
-            safe_log("The self-improvement succeed to be complied")
+        # is_compiled_self_improve uses metadata['overall_performance'] which is populated by run_harness_*
+        # This check should occur *after* evaluation.
+        # metadata['is_compiled'] = is_compiled_self_improve(metadata) # This seems premature here.
+
+        # For diagnose_improvement, use parent1_commit if fusion, else original parent_commit
+        diagnose_parent_ref_for_improvement = parent1_commit if is_fusion else parent_commit
+
+        # Only diagnose if a patch was generated and exists, and if it compiled (checked after eval)
+        if model_patch_exists:
+            # We'll update metadata['is_compiled'] after evaluation, then this diagnosis can be more robust.
+            # For now, we proceed assuming if patch exists, it might be diagnosable.
+            # The actual diagnosis might need to happen after evaluation results are in metadata.
+            # The `patch_files` argument to diagnose_improvement should be `eval_patch_files`
             improvement_diagnosis = diagnose_improvement(
-                entry, parent_commit, root_dir,
-                model_patch_file, out_dir_base, run_id,
-                patch_files=patch_files,
+                entry, diagnose_parent_ref_for_improvement, root_dir,
+                model_patch_file, out_dir_base, run_id, # model_patch_file is the one generated by agent
+                patch_files=eval_patch_files, # These are the patches applied for the eval run
             )
             metadata['improvement_diagnosis'] = improvement_diagnosis
             safe_log(f"Improvement diagnosis: {improvement_diagnosis}")
+            else:
+                safe_log("Skipping improvement diagnosis as no valid model patch was generated.")
+                metadata['improvement_diagnosis'] = "No model patch generated."
         else:
             safe_log("The self-improvement fail to be complied")
             metadata['improvement_diagnosis'] = "Fail to complied. Ignore this."
