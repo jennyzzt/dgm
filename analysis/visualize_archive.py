@@ -35,7 +35,7 @@ def get_evalquantity(dgm_dir, node_id, metadata_name="metadata.json", halluc=Fal
     metadata_path = os.path.join(dgm_dir, node_id, metadata_name)
     if not os.path.exists(metadata_path):
         raise FileNotFoundError(f"Metadata file not found for node {node_id} at {metadata_path}")
-    with open(metadata_path, "r") as f:
+    with open(metadata_path, "r", encoding="utf-8") as f:
         metadata = json.load(f)
     overall_performance = metadata.get("overall_performance", {})
     eval_quantity = overall_performance.get("total_submitted_instances", 0) if overall_performance else 0
@@ -48,7 +48,7 @@ def get_parent_commit(dgm_dir, child_node_id, metadata_name="metadata.json"):
     metadata_path = os.path.join(dgm_dir, child_node_id, metadata_name)
     if not os.path.exists(metadata_path):
         raise FileNotFoundError(f"Metadata file not found for node {child_node_id} at {metadata_path}")
-    with open(metadata_path, "r") as f:
+    with open(metadata_path, "r", encoding='utf-8') as f:
         metadata = json.load(f)
     return metadata.get("parent_commit")
 
@@ -60,7 +60,7 @@ def get_performance_score(dgm_dir, node_id, metadata_name="metadata.json"):
     metadata_path = os.path.join(dgm_dir, node_id, metadata_name)
     if not os.path.exists(metadata_path):
         raise FileNotFoundError(f"Metadata file not found for node {node_id} at {metadata_path}")
-    with open(metadata_path, "r") as f:
+    with open(metadata_path, "r", encoding='utf-8') as f:
         metadata = json.load(f)
     overall_performance = metadata.get("overall_performance", {})
     score = overall_performance.get("accuracy_score", 0.0) if overall_performance else 0.0
@@ -75,7 +75,7 @@ def get_hallucination_score(dgm_dir, node_id, metadata_name="metadata.json"):
     metadata_path = os.path.join(dgm_dir, node_id, metadata_name)
     if not os.path.exists(metadata_path):
         raise FileNotFoundError(f"Metadata file not found for node {node_id} at {metadata_path}")
-    with open(metadata_path, "r") as f:
+    with open(metadata_path, "r", encoding='utf-8') as f:
         metadata = json.load(f)
 
     halluc_perf = metadata.get("hallucination_performance", {})
@@ -100,7 +100,7 @@ def build_graph(dgm_dir, archives, score_func, metadata_name="metadata.json"):
     # Add the root node
     root_node = "initial"
     initial_metadata_path = os.path.join(dgm_dir, "initial", metadata_name)
-    with open(initial_metadata_path, "r") as f:
+    with open(initial_metadata_path, "r", encoding='utf-8') as f:
         initial_metadata = json.load(f)
 
     # Root node metric score
@@ -425,7 +425,7 @@ def analyse_experiment_run(dgm_dir, archives, metadata_name="metadata.json"):
         analysis_filename = "dgm_analysis.txt"
 
     analysis_path = os.path.join(dgm_dir, analysis_filename)
-    with open(analysis_path, "w") as f:
+    with open(analysis_path, "w", encoding="utf-8") as f:
         f.write(analysis_str)
 
     # Print the analysis string
@@ -492,7 +492,7 @@ def analyse_experiment_run_halluc(dgm_dir, archives, metadata_name="metadata.jso
         analysis_filename = "dgm_analysis_halluc.txt"
 
     analysis_path = os.path.join(dgm_dir, analysis_filename)
-    with open(analysis_path, "w") as f:
+    with open(analysis_path, "w", encoding='utf-8') as f:
         f.write(analysis_str)
 
     # Print the analysis string

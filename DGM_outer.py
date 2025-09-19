@@ -322,7 +322,7 @@ def main():
         archive = update_archive(output_dir, archive, selfimprove_ids_compiled, method=args.update_archive, noise_leeway=args.eval_noise)
 
         # Save DGM state
-        with open(os.path.join(output_dir, "dgm_metadata.jsonl"), "a") as f:
+        with open(os.path.join(output_dir, "dgm_metadata.jsonl"), "a", encoding='utf-8') as f:
             f.write(json.dumps({
                 "generation": gen_num,
                 "selfimprove_entries": selfimprove_entries,

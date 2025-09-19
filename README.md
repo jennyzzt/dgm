@@ -28,7 +28,15 @@ export OPENAI_API_KEY='...'
 export ANTHROPIC_API_KEY='...'
 ```
 
-To use Ollama
+To use Ollama, first make sure you have Ollama installed and running. You can find instructions on how to do this on the [Ollama website](https://ollama.com/).
+
+Once Ollama is running, you can configure the application to use it by setting the `OLLAMA_HOST` environment variable. If this variable is not set, it will default to `http://127.0.0.1:11434`.
+
+```bash
+export OLLAMA_HOST='http://127.0.0.1:11434'
+```
+
+To use a specific Ollama model, you need to prefix the model name with `ollama/`. For example, to use the `mistral` model, you would pass `ollama/mistral` as the model name. The default model is already set to `ollama/mistral`.
 
 ```bash
 # Verify that Docker is properly configured in your environment.

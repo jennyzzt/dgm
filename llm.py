@@ -6,9 +6,12 @@ import re
 import anthropic
 import backoff
 import openai
+import ollama
 
 MAX_OUTPUT_TOKENS = 4096
 AVAILABLE_LLMS = [
+    # Ollama models
+    "ollama/mistral",
     # Anthropic models
     "claude-3-5-sonnet-20240620",
     "claude-3-5-sonnet-20241022",
@@ -81,6 +84,10 @@ def create_client(model: str):
             api_key=os.environ["OPENROUTER_API_KEY"],
             base_url="https://openrouter.ai/api/v1"
         ), model
+    elif model.startswith("ollama/"):
+        print(f"Using Ollama with model {model}.")
+        client = ollama.Client(host=os.environ.get("OLLAMA_HOST", "http://127.0.0.1:11434"))
+        return client, model.split("/")[-1]
     else:
         raise ValueError(f"Model {model} not supported.")
 
@@ -181,7 +188,19 @@ def get_response_from_llm(
     if msg_history is None:
         msg_history = []
 
-    if "claude" in model:
+    if isinstance(client, ollama.Client):
+        new_msg_history = msg_history + [{"role": "user", "content": msg}]
+        response = client.chat(
+            model=model,
+            messages=[
+                {"role": "system", "content": system_message},
+                *new_msg_history,
+            ],
+            options={"temperature": temperature, "num_predict": MAX_OUTPUT_TOKENS},
+        )
+        content = response["message"]["content"]
+        new_msg_history = new_msg_history + [{"role": "assistant", "content": content}]
+    elif "claude" in model:
         new_msg_history = msg_history + [
             {
                 "role": "user",

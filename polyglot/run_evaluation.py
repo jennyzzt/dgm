@@ -95,7 +95,8 @@ def run_instance(
     # Set up report file + logger
     report_path = log_dir / "report.json"
     if report_path.exists():
-        return instance_id, json.loads(report_path.read_text())
+        with open(report_path, 'r', encoding='utf-8') as f:
+            return instance_id, json.load(f)
     logger = setup_logger(instance_id, log_file)
 
     # Run the instance
@@ -108,7 +109,8 @@ def run_instance(
 
         # Copy model prediction as patch file to container
         patch_file = Path(log_dir / "patch.diff")
-        patch_file.write_text(pred["model_patch"] or "")
+        with open(patch_file, 'w', encoding='utf-8') as f:
+            f.write(pred["model_patch"] or "")
         logger.info(
             f"Intermediate patch for {instance_id} written to {patch_file}, now applying to container..."
         )
@@ -148,7 +150,8 @@ def run_instance(
         logger.info(f"Git diff before:\n{git_diff_output_before}")
 
         eval_file = Path(log_dir / "eval.sh")
-        eval_file.write_text(test_spec.eval_script)
+        with open(eval_file, 'w', encoding='utf-8') as f:
+            f.write(test_spec.eval_script)
         logger.info(
             f"Eval script for {instance_id} written to {eval_file}; copying to container..."
         )
@@ -158,7 +161,7 @@ def run_instance(
         test_output, timed_out, total_runtime = exec_run_with_timeout(container, "/bin/bash /eval.sh", timeout)
         test_output_path = log_dir / "test_output.txt"
         logger.info(f'Test runtime: {total_runtime:_.2f} seconds')
-        with open(test_output_path, "w") as f:
+        with open(test_output_path, "w", encoding='utf-8') as f:
             f.write(test_output)
             logger.info(f"Test output for {instance_id} written to {test_output_path}")
             if timed_out:
@@ -193,7 +196,7 @@ def run_instance(
         )
 
         # Write report to report.json
-        with open(report_path, "w") as f:
+        with open(report_path, "w", encoding='utf-8') as f:
             f.write(json.dumps(report, indent=4))
         return instance_id, report
     except EvaluationError as e:
@@ -511,10 +514,10 @@ def main(
         predictions = get_gold_predictions(dataset_name, split)
     else:
         if predictions_path.endswith(".json"):
-            with open(predictions_path, "r") as f:
+            with open(predictions_path, "r", encoding='utf-8') as f:
                 predictions = json.load(f)
         elif predictions_path.endswith(".jsonl"):
-            with open(predictions_path, "r") as f:
+            with open(predictions_path, "r", encoding='utf-8') as f:
                 predictions = [json.loads(line) for line in f]
         else:
             raise ValueError("Predictions path must be \"gold\", .json, or .jsonl")

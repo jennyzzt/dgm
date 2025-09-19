@@ -115,7 +115,7 @@ def build_image(
         # Write the setup scripts to the build directory
         for setup_script_name, setup_script in setup_scripts.items():
             setup_script_path = build_dir / setup_script_name
-            with open(setup_script_path, "w") as f:
+            with open(setup_script_path, "w", encoding='utf-8') as f:
                 f.write(setup_script)
             if setup_script_name not in dockerfile:
                 logger.warning(
@@ -124,7 +124,7 @@ def build_image(
 
         # Write the dockerfile to the build directory
         dockerfile_path = build_dir / "Dockerfile"
-        with open(dockerfile_path, "w") as f:
+        with open(dockerfile_path, "w", encoding='utf-8') as f:
             f.write(dockerfile)
 
         # Build the image

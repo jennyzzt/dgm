@@ -12,7 +12,7 @@ import re
 
 def modify_cmake_file(cmake_file_path, new_exercise_value):
     # Step 1: Read the CMake file
-    with open(cmake_file_path, 'r') as f:
+    with open(cmake_file_path, 'r', encoding='utf-8') as f:
         lines = f.readlines()
 
     # Step 2: Find and modify the target line
@@ -25,7 +25,7 @@ def modify_cmake_file(cmake_file_path, new_exercise_value):
             break
 
     # Step 3: Write the modified content back to the file
-    with open(cmake_file_path, 'w') as f:
+    with open(cmake_file_path, 'w', encoding='utf-8') as f:
         f.writelines(lines)
 
 def extract_task_metadata(task_dir, all_commits):
@@ -47,7 +47,7 @@ def extract_task_metadata(task_dir, all_commits):
     # Read config.json if it exists
     config_path = task_dir / ".meta" / "config.json"
     if config_path.exists():
-        with open(config_path) as f:
+        with open(config_path, encoding='utf-8') as f:
             config = json.load(f)
             metadata.update({
                 "authors": config.get("authors", []),
@@ -66,7 +66,7 @@ def extract_task_metadata(task_dir, all_commits):
     if docs_dir.exists():
         problem_statement = ""
         for doc_file in docs_dir.glob("*.md"):
-            with open(doc_file) as f:
+            with open(doc_file, encoding='utf-8') as f:
                 problem_statement += f.read() + "\n\n"
         assert problem_statement, "Problem statement cannot be empty"
         metadata["problem_statement"] = problem_statement
@@ -86,7 +86,7 @@ def extract_task_metadata(task_dir, all_commits):
         test_file_path = task_dir / test_file
         if test_file_path.exists():
             test_content += f"### {test_file}\n"
-            with open(test_file_path) as f:
+            with open(test_file_path, encoding='utf-8') as f:
                 test_content += f.read() + "\n\n"
     metadata["reference_tests"] = test_content
 
@@ -99,7 +99,7 @@ def extract_task_metadata(task_dir, all_commits):
         example_file_path = task_dir / example_file
         if example_file_path.exists():
             example_content += f"### {example_file}\n"
-            with open(example_file_path) as f:
+            with open(example_file_path, encoding='utf-8') as f:
                 example_content += f.read() + "\n\n"
     metadata["reference_answers"] = example_content
 
@@ -148,7 +148,7 @@ def register_git(benchmark_path):
         print("All practice directories already initialized with git")
         commits_path = benchmark_path / "polyglot_benchmark_commits.json"
         if os.path.exists(commits_path):
-            with open(commits_path) as f:
+            with open(commits_path, encoding='utf-8') as f:
                 all_commits = json.load(f)
         else:
             raise FileNotFoundError(f"Commits file not found: {commits_path}")
@@ -167,7 +167,7 @@ def register_git(benchmark_path):
                 # read meta data
                 config_path = practice_dir / ".meta" / "config.json"
                 if config_path.exists():
-                    with open(config_path) as f:
+                    with open(config_path, encoding='utf-8') as f:
                         config = json.load(f)
                 else:
                     raise FileNotFoundError(f"Config file not found: {config_path}")
@@ -220,7 +220,7 @@ def register_git(benchmark_path):
                 all_commits.update(result)
         # Save all_commits dict to JSON file
         commits_path = benchmark_path / "polyglot_benchmark_commits.json"
-        with open(commits_path, "w") as f:
+        with open(commits_path, "w", encoding='utf-8') as f:
             json.dump(all_commits, f, indent=2)
         print(f"Saved commit hashes to {commits_path}")
         
@@ -247,7 +247,7 @@ def main():
     
     # Write metadata to JSON file
     output_path = "polyglot/polyglot_benchmark_metadata.json"
-    with open(output_path, "w") as f:
+    with open(output_path, "w", encoding='utf-8') as f:
         json.dump(metadata, f, indent=2)
     
     print(f"Generated metadata for {len(metadata)} tasks")

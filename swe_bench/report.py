@@ -69,7 +69,7 @@ def preds_to_jsonl(dname, predictions):
 
     predictions_jsonl = str(dname / "all_preds.jsonl")
     model_name_or_path = list(predictions.values())[0]["model_name_or_path"]
-    with open(predictions_jsonl, "w") as fh:
+    with open(predictions_jsonl, "w", encoding='utf-8') as fh:
         for inst, pred in predictions.items():
             assert model_name_or_path == pred["model_name_or_path"]
             minimal_pred = dict(

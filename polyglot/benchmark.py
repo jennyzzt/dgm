@@ -689,7 +689,7 @@ def run_test_real(
     if not config_file.exists():
         raise ValueError(f"No config file found: {config_file}")
 
-    with open(config_file) as f:
+    with open(config_file, encoding='utf-8') as f:
         config = json.loads(f.read())
 
     # Get file sets from config

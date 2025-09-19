@@ -25,9 +25,8 @@ from utils.docker_utils import (
 )
 
 dataset = None
-diagnose_model = 'o1-2024-12-17'
 
-def diagnose_problem(entry, commit, root_dir, out_dir, patch_files=[], max_attempts=3, polyglot=False):
+def diagnose_problem(entry, commit, root_dir, out_dir, patch_files=[], max_attempts=3, polyglot=False, diagnose_model='o1-2024-12-17'):
     client = create_client(diagnose_model)
     if polyglot:
         diagnose_sys_message, diagnose_prompt = get_diagnose_prompt_polyglot(
@@ -68,7 +67,7 @@ def diagnose_problem(entry, commit, root_dir, out_dir, patch_files=[], max_attem
 
 def diagnose_improvement(
         entry, parent_commit, root_dir, model_patch_file, out_dir, run_id,
-        patch_files=[], max_attempts=3,
+        patch_files=[], max_attempts=3, diagnose_model='o1-2024-12-17',
     ):
     """
     Diagnose the improvement of the model patch.
@@ -119,7 +118,7 @@ def diagnose_improvement(
 
 def save_metadata(metadata, output_dir):
     metadata_file = os.path.join(output_dir, "metadata.json")
-    with open(metadata_file, 'w') as f:
+    with open(metadata_file, 'w', encoding='utf-8') as f:
         json.dump(metadata, f, indent=4)
 
 def run_harness_swe(entry, model_name_or_path, patch_files, num_evals, output_dir, metadata, run_id, test_more_threshold, test_task_list, test_task_list_more):
@@ -234,12 +233,13 @@ def self_improve(
     full_eval_threshold=None,
     # Run baseline
     run_baseline=None,
-    polyglot=False
+    polyglot=False,
+    diagnose_model='o1-2024-12-17'
 ):  
 
     global dataset
     if polyglot:
-        with open("polyglot/polyglot_benchmark_metadata.json") as f:
+        with open("polyglot/polyglot_benchmark_metadata.json", encoding='utf-8') as f:
             dataset = json.loads(f.read())
     else:
         from datasets import load_dataset
@@ -315,7 +315,7 @@ def self_improve(
     # Get tasks to improve
     if entry:
         safe_log(f"Task to improve: {entry}")
-        problem_statement = diagnose_problem(entry, parent_commit, root_dir, out_dir_base, patch_files=patch_files, polyglot=polyglot)
+        problem_statement = diagnose_problem(entry, parent_commit, root_dir, out_dir_base, patch_files=patch_files, polyglot=polyglot, diagnose_model=diagnose_model)
         safe_log(f"problem_statement: {problem_statement}")
     else:
         safe_log("No entry provided. Exiting.")
@@ -369,7 +369,7 @@ def self_improve(
         # Check if patch file exists and is not empty
         if not os.path.exists(model_patch_file):
             raise Exception("Model patch file is empty or does not exist")
-        with open(model_patch_file, 'r') as f:
+        with open(model_patch_file, 'r', encoding='utf-8') as f:
             patch_content = f.read()
             if not patch_content.strip():
                 raise Exception("Model patch file is empty")
@@ -408,6 +408,7 @@ def self_improve(
                 entry, parent_commit, root_dir,
                 model_patch_file, out_dir_base, run_id,
                 patch_files=patch_files,
+                diagnose_model=diagnose_model,
             )
             metadata['improvement_diagnosis'] = improvement_diagnosis
             safe_log(f"Improvement diagnosis: {improvement_diagnosis}")
@@ -428,6 +429,7 @@ def main():
     parser.add_argument('--no_post_improve_diagnose', default=False, action='store_true', help='Skip diagnosing the self-improvement after evaluation')
     parser.add_argument('--entry', default="django__django-10999", type=str, help='Task entry to improve')
     parser.add_argument('--test_task_list', default=None, type=str, help='List of tasks to evaluate the self-improvement')
+    parser.add_argument('--diagnose_model', default="o1-2024-12-17", type=str, help='Model to use for diagnosis')
     args = parser.parse_args()
 
     # Copy cached initial version into experiment dir
@@ -441,6 +443,7 @@ def main():
         post_improve_diagnose=not args.no_post_improve_diagnose,
         entry=args.entry,
         test_task_list=args.test_task_list,
+        diagnose_model=args.diagnose_model,
     )
 
 if __name__ == "__main__":

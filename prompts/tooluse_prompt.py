@@ -13,7 +13,7 @@ def get_tooluse_prompt():
         if file.endswith('.py') and file != '__init__.py'
     ]
     # Read the contents of the tool files
-    tool_file_contents = [open(file).read().strip() for file in tool_files]
+    tool_file_contents = [open(file, encoding='utf-8').read().strip() for file in tool_files]
     tools_available = [f"```python\n{tool_content}\n```" for tool_content in tool_file_contents]
     tools_available = '\n\n'.join(tools_available)
     # Create the prompt

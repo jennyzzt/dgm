@@ -44,7 +44,7 @@ def process_entry(entry, out_dname, model_name_or_path, model_patch_paths):
     # Skip if output result already exists
     if out_fname.exists():
         print(f"Skipping existing entry {instance_id}")
-        with open(out_fname) as f:
+        with open(out_fname, encoding='utf-8') as f:
             result = json.loads(f.read())
         return result
 
@@ -154,7 +154,8 @@ def process_entry(entry, out_dname, model_name_or_path, model_patch_paths):
             "eval_result": eval_result,
             "success": True
         }
-            out_fname.write_text(json.dumps(result, indent=4))
+            with open(out_fname, 'w', encoding='utf-8') as f:
+                json.dump(result, f, indent=4)
             return {"success": True, "instance_id": instance_id, "eval_result": eval_result}
     
 
@@ -171,7 +172,8 @@ def process_entry(entry, out_dname, model_name_or_path, model_patch_paths):
         language = entry['language']
         test_command = TEST_COMMANDS[language]
 
-        eval_file.write_text(get_eval_script(test_command))
+        with open(eval_file, 'w', encoding='utf-8') as f:
+            f.write(get_eval_script(test_command))
 
         copy_to_container(container, eval_file, '/testbed/eval.sh')
         exec_result = container.exec_run("ls -R /testbed", workdir='/') 
@@ -181,7 +183,8 @@ def process_entry(entry, out_dname, model_name_or_path, model_patch_paths):
 
         exec_result = container.exec_run("timeout 120 ./eval.sh", workdir='/testbed')
         log_container_output(exec_result, raise_error=False)
-        eval_result_file.write_text(exec_result.output.decode())
+        with open(eval_result_file, 'w', encoding='utf-8') as f:
+            f.write(exec_result.output.decode())
         if exec_result.exit_code == 0:
             eval_result = 'resolved'
         else:
@@ -196,7 +199,8 @@ def process_entry(entry, out_dname, model_name_or_path, model_patch_paths):
             "eval_result": eval_result,
             "success": True
         }
-        out_fname.write_text(json.dumps(result, indent=4))
+        with open(out_fname, 'w', encoding='utf-8') as f:
+            json.dump(result, f, indent=4)
 
         return {"success": True, "instance_id": instance_id, "eval_result": eval_result}
 
@@ -221,7 +225,8 @@ def process_entry(entry, out_dname, model_name_or_path, model_patch_paths):
             "eval_result": eval_result,
             "success": False
         }
-        out_fname.write_text(json.dumps(result, indent=4))
+        with open(out_fname, 'w', encoding='utf-8') as f:
+            json.dump(result, f, indent=4)
         
         print(f"Error processing entry {instance_id}: {str(e)}")
         return {"success": False, "instance_id": instance_id, "eval_result": eval_result}
@@ -259,11 +264,11 @@ def harness(
     if model_patch_paths:
         for model_patch_path in model_patch_paths:
             # Read and modify model patch
-            with open(model_patch_path, 'r') as f:
+            with open(model_patch_path, 'r', encoding='utf-8') as f:
                 patch_content = f.read()
             patch_content = remove_patch_by_files(patch_content)
             # Placeholder for any patch modifications if needed
-            with open(model_patch_path, 'w') as f:
+            with open(model_patch_path, 'w', encoding='utf-8') as f:
                 f.write(patch_content)
 
     if num_evals > 1:
@@ -272,7 +277,7 @@ def harness(
     # Load dataset
     if not os.path.exists(dataset_path):
         raise FileNotFoundError(f"Dataset file not found: {dataset_path}")
-    with open(dataset_path) as f:
+    with open(dataset_path, encoding='utf-8') as f:
         dataset = json.load(f)
     
     # Ensure that necessary directories exist
@@ -376,7 +381,7 @@ def harness(
         + f".{000}"
         + ".json"
     )
-    with open(report_file, "w") as f:
+    with open(report_file, "w", encoding='utf-8') as f:
         print(json.dumps(report, indent=4), file=f)
     print(f"Report written to {report_file}")
 
@@ -393,7 +398,7 @@ def main():
     parser.add_argument("--num_evals_parallel", type=int, default=1, help="Number of parallel repeated evaluations")
     args = parser.parse_args()
     
-    with open("polyglot/polyglot_benchmark_metadata.json") as f:
+    with open("polyglot/polyglot_benchmark_metadata.json", encoding='utf-8') as f:
         metadata = json.loads(f.read())
         language_task_list = [entry["instance_id"] for entry in metadata if entry["instance_id"].startswith("python")]
         # Create a list of all tasks from metadata
