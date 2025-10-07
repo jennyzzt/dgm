@@ -26,6 +26,14 @@ Repository for **Darwin Gödel Machine (DGM)**, a novel self-improving system th
 # API keys, add to ~/.bashrc
 export OPENAI_API_KEY='...'
 export ANTHROPIC_API_KEY='...'
+# Optional: OpenRouter / Deepseek
+export OPENROUTER_API_KEY='...'
+export DEEPSEEK_API_KEY='...'
+# Optional: Local endpoints for LocalAI / Ollama (OpenAI-compatible)
+export LOCALAI_BASE_URL='http://localhost:8080/v1'   # default if unset
+export LOCALAI_API_KEY='localai'                      # default if unset
+export OLLAMA_BASE_URL='http://localhost:11434/v1'   # default if unset
+export OLLAMA_API_KEY='ollama'                        # default if unset
 ```
 
 ```bash
@@ -67,6 +75,50 @@ python -m polyglot.prepare_polyglot_dataset
 python DGM_outer.py
 ```
 By default, outputs will be saved in the `output_dgm/` directory.
+
+### Using Local models (LocalAI or Ollama)
+The LLM layer supports any OpenAI-compatible server. You can select a model via:
+- CLI: `--model <provider/model>`
+- Environment variable: `DGM_MODEL` (fallback)
+
+Providers:
+- LocalAI: prefix `localai/`, e.g. `localai/llama-3.1-8b-instruct`
+  - Server default: http://localhost:8080/v1 (override with LOCALAI_BASE_URL)
+- Ollama: prefix `ollama/`, e.g. `ollama/llama3.2`
+  - Server default: http://localhost:11434/v1 (override with OLLAMA_BASE_URL)
+
+Environment variables (optional):
+```bash
+export LOCALAI_BASE_URL='http://localhost:8080/v1'
+export LOCALAI_API_KEY='localai'
+export OLLAMA_BASE_URL='http://localhost:11434/v1'
+export OLLAMA_API_KEY='ollama'
+```
+
+Examples:
+```bash
+# Run coding agent with LocalAI (LocalAI server must be running)
+export DGM_MODEL='localai/llama-3.1-8b-instruct'
+python coding_agent.py --problem_statement "..." --git_dir /path/to/repo \
+  --base_commit <sha> --chat_history_file ./chat_history.md
+
+# Or specify on CLI
+python coding_agent.py --problem_statement "..." --git_dir /path/to/repo \
+  --base_commit <sha> --chat_history_file ./chat_history.md \
+  --model localai/llama-3.2-3b-instruct
+
+# Run with Ollama
+python coding_agent.py --problem_statement "..." --git_dir /path/to/repo \
+  --base_commit <sha> --chat_history_file ./chat_history.md \
+  --model ollama/llama3.2
+```
+
+Quickstart for LocalAI:
+- Docker compose and packaged images: see coleam00/local-ai-packaged
+- Upstream project: mudler/LocalAI
+- Ensure the server exposes an OpenAI-compatible endpoint, e.g. http://localhost:8080/v1
+
+Note: For models without native tool-calling, the agent falls back to manual tool use via prompts (<tool_use> blocks), so LocalAI/Ollama can still execute tools.
 
 ## File Structure
 - `analysis/` scripts used for plotting and analysis

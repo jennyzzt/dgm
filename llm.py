@@ -39,6 +39,15 @@ AVAILABLE_LLMS = [
     "deepseek-chat",
     "deepseek-coder",
     "deepseek-reasoner",
+    # Ollama models (examples; users can specify any Ollama model as ollama/<model_name>)
+    "ollama/llama3.2",
+    "ollama/llama3.1",
+    "ollama/codellama",
+    "ollama/mistral",
+    # LocalAI models (examples; users can specify any LocalAI model as localai/<model_name>)
+    "localai/llama-3.2-3b-instruct",
+    "localai/llama-3.1-8b-instruct",
+    "localai/mistral-7b-instruct",
 ]
 
 def create_client(model: str):
@@ -80,7 +89,28 @@ def create_client(model: str):
         client = openai.OpenAI(
             api_key=os.environ["OPENROUTER_API_KEY"],
             base_url="https://openrouter.ai/api/v1"
-        ), model
+        )
+        return client, model
+    elif model.startswith("ollama/"):
+        client_model = model.split("/", 1)[1]
+        print(f"Using Ollama with model {client_model}.")
+        base_url = os.getenv("OLLAMA_BASE_URL", "http://localhost:11434/v1")
+        api_key = os.getenv("OLLAMA_API_KEY", "ollama")
+        client = openai.OpenAI(
+            base_url=base_url,
+            api_key=api_key
+        )
+        return client, client_model
+    elif model.startswith("localai/"):
+        client_model = model.split("/", 1)[1]
+        print(f"Using LocalAI with model {client_model}.")
+        base_url = os.getenv("LOCALAI_BASE_URL", "http://localhost:8080/v1")
+        api_key = os.getenv("LOCALAI_API_KEY", "localai")
+        client = openai.OpenAI(
+            base_url=base_url,
+            api_key=api_key
+        )
+        return client, client_model
     else:
         raise ValueError(f"Model {model} not supported.")
 
@@ -292,7 +322,21 @@ def get_response_from_llm(
         new_msg_history = new_msg_history + [{"role": "assistant", "content": content}]
         resoning_content = response.choices[0].message.reasoning_content
     else:
-        raise ValueError(f"Model {model} not supported.")
+        # General OpenAI-compatible handling (e.g., Ollama, other providers)
+        new_msg_history = msg_history + [{"role": "user", "content": msg}]
+        response = client.chat.completions.create(
+            model=model,
+            messages=[
+                {"role": "system", "content": system_message},
+                *new_msg_history,
+            ],
+            temperature=temperature,
+            max_tokens=MAX_OUTPUT_TOKENS,
+            n=1,
+            stop=None,
+        )
+        content = response.choices[0].message.content
+        new_msg_history = new_msg_history + [{"role": "assistant", "content": content}]
     if print_debug:
         print()
         print("*" * 20 + " LLM START " + "*" * 20)

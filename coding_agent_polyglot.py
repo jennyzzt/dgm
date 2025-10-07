@@ -102,7 +102,8 @@ class AgenticSystem:
             chat_history_file='./chat_history.md',
             test_description=None,
             self_improve=False,
-            language='python'
+            language='python',
+            model=None,
         ):
         self.problem_statement = problem_statement
         self.git_tempdir = git_tempdir
@@ -113,7 +114,8 @@ class AgenticSystem:
         self.language = language
 
         # Set the code model based on whether self-improvement is enabled
-        self.code_model = CLAUDE_MODEL if not self_improve else OPENAI_MODEL
+        env_model = os.getenv('DGM_MODEL')
+        self.code_model = model or env_model or (CLAUDE_MODEL if not self_improve else OPENAI_MODEL)
 
         # Initialize logger and store it in thread-local storage
         self.logger = setup_logger(chat_history_file)
@@ -162,6 +164,7 @@ def main():
     parser.add_argument('--test_description', default=None, required=False, help='Description of how to test the repository')
     parser.add_argument('--self_improve', default=False, action='store_true', help='Whether to self-improve the repository or solving swe')
     parser.add_argument('--language', required=False, default="python", choices=['cpp', 'java', 'python', 'go', 'rust', 'javascript'], help='Task\'s programming language')
+    parser.add_argument('--model', default=None, help='LLM model to use (e.g., localai/llama-3.1-8b-instruct, ollama/llama3.2, claude-3-5-sonnet-20241022)')
     args = parser.parse_args()
 
     # Process the repository
@@ -173,6 +176,7 @@ def main():
         test_description=args.test_description,
         self_improve=args.self_improve,
         language=args.language,
+        model=args.model,
     )
 
     # Run the agentic system to try to solve the problem
