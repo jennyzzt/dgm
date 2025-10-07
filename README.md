@@ -34,6 +34,11 @@ export LOCALAI_BASE_URL='http://localhost:8080/v1'   # default if unset
 export LOCALAI_API_KEY='localai'                      # default if unset
 export OLLAMA_BASE_URL='http://localhost:11434/v1'   # default if unset
 export OLLAMA_API_KEY='ollama'                        # default if unset
+# Optional: Local file models via llama.cpp
+export LLAMA_CPP_MODEL_PATH='/abs/path/to/model.gguf'
+export LLAMA_CPP_N_CTX=8192
+export LLAMA_CPP_N_GPU_LAYERS=0
+export LLAMA_CPP_CHAT_FORMAT='llama-3'
 ```
 
 ```bash
@@ -76,7 +81,7 @@ python DGM_outer.py
 ```
 By default, outputs will be saved in the `output_dgm/` directory.
 
-### Using Local models (LocalAI or Ollama)
+### Using Local models (LocalAI or Ollama servers)
 The LLM layer supports any OpenAI-compatible server. You can select a model via:
 - CLI: `--model <provider/model>`
 - Environment variable: `DGM_MODEL` (fallback)
@@ -113,12 +118,36 @@ python coding_agent.py --problem_statement "..." --git_dir /path/to/repo \
   --model ollama/llama3.2
 ```
 
+### Using Local model files directly (no server)
+You can run GGUF models locally using llama.cpp via llama-cpp-python. Either:
+- Set `DGM_MODEL="llama-cpp/<absolute_path_to_model.gguf>"`, or
+- Set `LLAMA_CPP_MODEL_PATH` environment variable and use `DGM_MODEL=llama-cpp`.
+
+Optional tuning via env vars:
+- `LLAMA_CPP_N_CTX` (default 8192)
+- `LLAMA_CPP_N_GPU_LAYERS` (default 0)
+- `LLAMA_CPP_CHAT_FORMAT` (default "llama-3")
+
+Examples:
+```bash
+# Directly in the model string
+python coding_agent.py --problem_statement "..." --git_dir /path/to/repo \
+  --base_commit <sha> --chat_history_file ./chat_history.md \
+  --model "llama-cpp/C:/models/llama-3.2-3b-instruct.Q4_K_M.gguf"
+
+# Using environment variable
+set LLAMA_CPP_MODEL_PATH=C:\\models\\llama-3.2-3b-instruct.Q4_K_M.gguf
+python coding_agent.py --problem_statement "..." --git_dir /path/to/repo \
+  --base_commit <sha> --chat_history_file ./chat_history.md \
+  --model llama-cpp
+```
+
 Quickstart for LocalAI:
 - Docker compose and packaged images: see coleam00/local-ai-packaged
 - Upstream project: mudler/LocalAI
 - Ensure the server exposes an OpenAI-compatible endpoint, e.g. http://localhost:8080/v1
 
-Note: For models without native tool-calling, the agent falls back to manual tool use via prompts (<tool_use> blocks), so LocalAI/Ollama can still execute tools.
+Note: For models without native tool-calling, the agent falls back to manual tool use via prompts (<tool_use> blocks), so LocalAI/Ollama and llama-cpp can still execute tools.
 
 ## File Structure
 - `analysis/` scripts used for plotting and analysis

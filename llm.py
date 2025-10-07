@@ -2,10 +2,17 @@
 import json
 import os
 import re
+from types import SimpleNamespace
 
 import anthropic
 import backoff
 import openai
+
+# Optional local model runtime (llama.cpp via llama-cpp-python)
+try:
+    from llama_cpp import Llama
+except Exception:
+    Llama = None
 
 MAX_OUTPUT_TOKENS = 4096
 AVAILABLE_LLMS = [
@@ -48,7 +55,55 @@ AVAILABLE_LLMS = [
     "localai/llama-3.2-3b-instruct",
     "localai/llama-3.1-8b-instruct",
     "localai/mistral-7b-instruct",
+    # Local file models via llama.cpp (examples)
+    # Use DGM_MODEL='llama-cpp/<absolute_path_to_model.gguf>' or set LLAMA_CPP_MODEL_PATH
+    "llama-cpp",
 ]
+
+class LlamaCppChatClient:
+    """Minimal OpenAI-compatible chat client backed by llama.cpp (local GGUF files).
+
+    It exposes client.chat.completions.create(...), returning an object with
+    .choices[0].message.content to match the OpenAI client usage in this codebase.
+    """
+
+    def __init__(self, model_path: str, n_ctx: int = 8192, n_gpu_layers: int = 0, chat_format: str = "llama-3"):
+        if Llama is None:
+            raise ImportError(
+                "llama-cpp-python is not installed. Install with: pip install llama-cpp-python"
+            )
+        # Initialize llama.cpp
+        self._llm = Llama(
+            model_path=model_path,
+            n_ctx=n_ctx,
+            n_gpu_layers=n_gpu_layers,
+            chat_format=chat_format,
+        )
+
+    class _Completions:
+        def __init__(self, parent: "LlamaCppChatClient"):
+            self._parent = parent
+
+        def create(self, model=None, messages=None, temperature=0.7, max_tokens=MAX_OUTPUT_TOKENS, n=1, stop=None, seed=None, **kwargs):
+            if messages is None:
+                messages = []
+            args = dict(messages=messages, temperature=float(temperature), max_tokens=int(max_tokens))
+            if stop:
+                args["stop"] = stop
+            # llama-cpp create_chat_completion accepts the OpenAI messages format
+            resp = self._parent._llm.create_chat_completion(**args)
+            # Normalize into an object with .choices[0].message.content
+            content = resp.get("choices", [{}])[0].get("message", {}).get("content", "")
+            return SimpleNamespace(choices=[SimpleNamespace(message=SimpleNamespace(content=content))])
+
+    class _Chat:
+        def __init__(self, parent: "LlamaCppChatClient"):
+            self.completions = LlamaCppChatClient._Completions(parent)
+
+    @property
+    def chat(self):
+        return LlamaCppChatClient._Chat(self)
+
 
 def create_client(model: str):
     """
@@ -111,6 +166,18 @@ def create_client(model: str):
             api_key=api_key
         )
         return client, client_model
+    elif model.startswith("llama-cpp"):
+        # Format: 'llama-cpp/<absolute_path_to_model.gguf>' or set LLAMA_CPP_MODEL_PATH
+        model_path = model[len("llama-cpp/"):] if len(model) > len("llama-cpp/") else os.getenv("LLAMA_CPP_MODEL_PATH")
+        if not model_path:
+            raise ValueError("llama-cpp model path not provided. Set DGM_MODEL='llama-cpp/<absolute_path_to_gguf>' or LLAMA_CPP_MODEL_PATH env var.")
+        n_ctx = int(os.getenv("LLAMA_CPP_N_CTX", "8192"))
+        n_gpu_layers = int(os.getenv("LLAMA_CPP_N_GPU_LAYERS", "0"))
+        chat_format = os.getenv("LLAMA_CPP_CHAT_FORMAT", "llama-3")
+        print(f"Using llama-cpp local model at {model_path} (ctx={n_ctx}, gpu_layers={n_gpu_layers}, chat_format={chat_format}).")
+        client = LlamaCppChatClient(model_path=model_path, n_ctx=n_ctx, n_gpu_layers=n_gpu_layers, chat_format=chat_format)
+        # For llama-cpp we return the model string as-is; downstream uses it only for routing
+        return client, model
     else:
         raise ValueError(f"Model {model} not supported.")
 
@@ -322,7 +389,7 @@ def get_response_from_llm(
         new_msg_history = new_msg_history + [{"role": "assistant", "content": content}]
         resoning_content = response.choices[0].message.reasoning_content
     else:
-        # General OpenAI-compatible handling (e.g., Ollama, other providers)
+        # General OpenAI-compatible handling (e.g., Ollama, LocalAI, llama-cpp wrapper)
         new_msg_history = msg_history + [{"role": "user", "content": msg}]
         response = client.chat.completions.create(
             model=model,
