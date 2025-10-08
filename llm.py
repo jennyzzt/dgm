@@ -17,18 +17,22 @@ AVAILABLE_LLMS = [
     "o1-mini-2024-09-12",
     "o1-2024-12-17",
     "o3-mini-2025-01-31",
+    # OpenRouter models
     "llama3.1-405b",
+    # Anthropic Claude models via Amazon Bedrock
     "bedrock/anthropic.claude-3-sonnet-20240229-v1:0",
     "bedrock/anthropic.claude-3-5-sonnet-20240620-v1:0",
     "bedrock/anthropic.claude-3-5-sonnet-20241022-v2:0",
     "bedrock/anthropic.claude-3-haiku-20240307-v1:0",
     "bedrock/anthropic.claude-3-opus-20240229-v1:0",
     "bedrock/us.anthropic.claude-3-5-sonnet-20241022-v2:0",
+    # Anthropic Claude models Vertex AI
     "vertex_ai/claude-3-opus@20240229",
     "vertex_ai/claude-3-5-sonnet@20240620",
     "vertex_ai/claude-3-5-sonnet-v2@20241022",
     "vertex_ai/claude-3-sonnet@20240229",
     "vertex_ai/claude-3-haiku@20240307",
+    # DeepSeek models
     "deepseek-chat",
     "deepseek-coder",
     "deepseek-reasoner",
