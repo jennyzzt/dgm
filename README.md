@@ -29,16 +29,25 @@ export ANTHROPIC_API_KEY='...'
 # Optional: OpenRouter / Deepseek
 export OPENROUTER_API_KEY='...'
 export DEEPSEEK_API_KEY='...'
-# Optional: Local endpoints for LocalAI / Ollama (OpenAI-compatible)
+
+# Local Model Options (choose one or more):
+
+## Option 1: Local endpoints for LocalAI / Ollama (OpenAI-compatible)
 export LOCALAI_BASE_URL='http://localhost:8080/v1'   # default if unset
 export LOCALAI_API_KEY='localai'                      # default if unset
 export OLLAMA_BASE_URL='http://localhost:11434/v1'   # default if unset
 export OLLAMA_API_KEY='ollama'                        # default if unset
-# Optional: Local file models via llama.cpp
+
+## Option 2: Local file models via llama.cpp
 export LLAMA_CPP_MODEL_PATH='/abs/path/to/model.gguf'
 export LLAMA_CPP_N_CTX=8192
-export LLAMA_CPP_N_GPU_LAYERS=0
-export LLAMA_CPP_CHAT_FORMAT='llama-3'
+export LLAMA_CPP_N_GPU_LAYERS=0  # Set to higher values to use GPU acceleration
+export LLAMA_CPP_CHAT_FORMAT='llama-3'  # Options: llama-3, chatml, vicuna, etc.
+
+## Option 3: Hugging Face models (automatically downloaded)
+export HF_N_CTX=8192
+export HF_N_GPU_LAYERS=0  # Set to higher values to use GPU acceleration
+export HF_CHAT_FORMAT='llama-3'  # Options: llama-3, chatml, vicuna, etc.
 ```
 
 ```bash
@@ -49,6 +58,38 @@ docker run hello-world
 sudo usermod -aG docker $USER
 newgrp docker
 ```
+
+## Using Local AI Models
+
+DGM now supports running with local AI models in addition to cloud API-based models. This gives you more flexibility, privacy, and potentially lower costs for running the system.
+
+### Available Local Model Options
+
+1. **LocalAI**: An OpenAI API-compatible interface for running local models
+   - Setup: Follow instructions at [LocalAI GitHub](https://github.com/mudler/LocalAI)
+   - Configure using `LOCALAI_BASE_URL` and `LOCALAI_API_KEY` environment variables
+
+2. **Ollama**: Easy setup for running LLMs locally
+   - Setup: Install from [Ollama.ai](https://ollama.ai/)
+   - Pull models with `ollama pull llama3` or other model names
+   - Configure using `OLLAMA_BASE_URL` and `OLLAMA_API_KEY` environment variables
+
+3. **Direct GGUF Models via llama.cpp**:
+   - Download a GGUF model file
+   - Set `LLAMA_CPP_MODEL_PATH` to the absolute path of your model file
+   - Configure context size and GPU acceleration as needed
+
+4. **Hugging Face Models**:
+   - Use models directly from Hugging Face Hub with the `hf/` prefix
+   - Example: `hf/TheBloke/Llama-3.1-8B-Instruct-GGUF` or `hf/TheBloke/Mistral-7B-Instruct-v0.2-GGUF`
+   - Models are automatically downloaded and cached locally
+   - Configure with `HF_N_CTX`, `HF_N_GPU_LAYERS`, and `HF_CHAT_FORMAT` environment variables
+
+### GPU Acceleration
+
+For better performance with local models:
+- Install GPU-enabled versions of llama-cpp-python: `pip install llama-cpp-python-cuda` (NVIDIA) or `llama-cpp-python-rocm` (AMD)
+- Set `LLAMA_CPP_N_GPU_LAYERS` or `HF_N_GPU_LAYERS` to a higher value (try 35 for 7B models, 60+ for larger models)
 
 ```bash
 # Install dependencies

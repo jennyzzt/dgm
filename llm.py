@@ -8,17 +8,12 @@ import anthropic
 import backoff
 import openai
 
-# Optional local model runtime (llama.cpp via llama-cpp-python)
+# Optional local model runtimes
 try:
     from llama_cpp import Llama
 except Exception:
     Llama = None
 
-MAX_OUTPUT_TOKENS = 4096
-AVAILABLE_LLMS = [
-    # Anthropic models
-    "claude-3-5-sonnet-20240620",
-    "claude-3-5-sonnet-20241022",
     # OpenAI models
     "gpt-4o-mini-2024-07-18",
     "gpt-4o-2024-05-13",
@@ -55,12 +50,36 @@ AVAILABLE_LLMS = [
     "localai/llama-3.2-3b-instruct",
     "localai/llama-3.1-8b-instruct",
     "localai/mistral-7b-instruct",
+    # Hugging Face models (examples; users can specify any HF model as hf/<repo_id>)
+    "hf/TheBloke/Llama-3.1-8B-Instruct-GGUF",
+    "hf/TheBloke/Mistral-7B-Instruct-v0.2-GGUF",
+    "hf/TheBloke/Phi-3-mini-4k-instruct-GGUF",
     # Local file models via llama.cpp (examples)
     # Use DGM_MODEL='llama-cpp/<absolute_path_to_model.gguf>' or set LLAMA_CPP_MODEL_PATH
     "llama-cpp",
-]
 
-class LlamaCppChatClient:
+
+class LocalModelClient:
+    """Base class for local model clients that provide OpenAI-compatible interfaces."""
+    
+    def __init__(self):
+        self.chat = SimpleNamespace()
+        self.chat.completions = SimpleNamespace()
+        self.chat.completions.create = self._create_completion
+    
+    def _create_completion(self, **kwargs):
+        """To be implemented by subclasses."""
+        raise NotImplementedError("Subclasses must implement _create_completion")
+    
+    def _format_response(self, content):
+        """Format response to match OpenAI API response structure."""
+        response = SimpleNamespace()
+        response.choices = [SimpleNamespace()]
+        response.choices[0].message = SimpleNamespace()
+        response.choices[0].message.content = content
+        return response
+
+class LlamaCppChatClient(LocalModelClient):
     """Minimal OpenAI-compatible chat client backed by llama.cpp (local GGUF files).
 
     It exposes client.chat.completions.create(...), returning an object with
@@ -68,6 +87,7 @@ class LlamaCppChatClient:
     """
 
     def __init__(self, model_path: str, n_ctx: int = 8192, n_gpu_layers: int = 0, chat_format: str = "llama-3"):
+        super().__init__()
         if Llama is None:
             raise ImportError(
                 "llama-cpp-python is not installed. Install with: pip install llama-cpp-python"
@@ -79,6 +99,102 @@ class LlamaCppChatClient:
             n_gpu_layers=n_gpu_layers,
             chat_format=chat_format,
         )
+        
+    def _create_completion(self, model, messages, temperature=0.7, max_tokens=MAX_OUTPUT_TOKENS, **kwargs):
+        """Create a chat completion using llama.cpp."""
+        # Format messages for llama.cpp
+        formatted_messages = []
+        for msg in messages:
+            role = msg.get("role", "")
+            content = msg.get("content", "")
+            if isinstance(content, list):
+                # Handle content that might be a list of content blocks
+                content = " ".join([c.get("text", "") if isinstance(c, dict) else c for c in content])
+            formatted_messages.append({"role": role, "content": content})
+        
+        # Generate completion
+        completion = self._llm.create_chat_completion(
+            messages=formatted_messages,
+            temperature=temperature,
+            max_tokens=max_tokens,
+        )
+        
+        return completion
+
+class HuggingFaceChatClient(LocalModelClient):
+    """OpenAI-compatible chat client for Hugging Face models.
+    
+    Downloads models from Hugging Face Hub and uses llama.cpp to run them.
+    """
+    
+    def __init__(self, repo_id: str, filename: str = None, n_ctx: int = 8192, n_gpu_layers: int = 0, chat_format: str = "llama-3"):
+        super().__init__()
+        if huggingface_hub is None:
+            raise ImportError(
+                "huggingface_hub is not installed. Install with: pip install huggingface_hub"
+            )
+        if Llama is None:
+            raise ImportError(
+                "llama-cpp-python is not installed. Install with: pip install llama-cpp-python"
+            )
+            
+        # Download model from Hugging Face
+        print(f"Downloading model from Hugging Face: {repo_id}")
+        if filename:
+            model_path = huggingface_hub.hf_hub_download(repo_id=repo_id, filename=filename)
+        else:
+            # Try to find a GGUF file in the repo
+            files = huggingface_hub.list_repo_files(repo_id=repo_id)
+            gguf_files = [f for f in files if f.endswith(".gguf")]
+            if not gguf_files:
+                raise ValueError(f"No GGUF files found in repository {repo_id}")
+            
+            # Prefer smaller quantized models (Q4_K_M, Q5_K_M) if available
+            preferred_quantizations = ["Q4_K_M", "Q5_K_M", "Q4_0", "Q5_0", "Q8_0"]
+            for quant in preferred_quantizations:
+                for file in gguf_files:
+                    if quant in file:
+                        filename = file
+                        break
+                if filename:
+                    break
+            
+            # If no preferred quantization found, use the first GGUF file
+            if not filename:
+                filename = gguf_files[0]
+                
+            model_path = huggingface_hub.hf_hub_download(repo_id=repo_id, filename=filename)
+        
+        print(f"Model downloaded to: {model_path}")
+        
+        # Initialize llama.cpp with the downloaded model
+        self._llm = Llama(
+            model_path=model_path,
+            n_ctx=n_ctx,
+            n_gpu_layers=n_gpu_layers,
+            chat_format=chat_format,
+        )
+    
+    def _create_completion(self, model, messages, temperature=0.7, max_tokens=MAX_OUTPUT_TOKENS, **kwargs):
+        """Create a chat completion using the Hugging Face model via llama.cpp."""
+        # Format messages for llama.cpp
+        formatted_messages = []
+        for msg in messages:
+            role = msg.get("role", "")
+            content = msg.get("content", "")
+            if isinstance(content, list):
+                # Handle content that might be a list of content blocks
+                content = " ".join([c.get("text", "") if isinstance(c, dict) else c for c in content])
+            formatted_messages.append({"role": role, "content": content})
+        
+        # Generate completion
+        completion = self._llm.create_chat_completion(
+            messages=formatted_messages,
+            temperature=temperature,
+            max_tokens=max_tokens,
+        )
+        
+        return completion
 
     class _Completions:
         def __init__(self, parent: "LlamaCppChatClient"):
@@ -113,6 +229,7 @@ def create_client(model: str):
     Returns:
         Tuple[Any, str]: A tuple containing the client instance and the client model name.
     """
+    # Cloud API models
     if model.startswith("claude-"):
         print(f"Using Anthropic API with model {model}.")
         return anthropic.Anthropic(), model
@@ -135,17 +252,19 @@ def create_client(model: str):
     elif model.startswith("deepseek-"):
         print(f"Using OpenAI API with {model}.")
         client = openai.OpenAI(
-            api_key=os.environ["DEEPSEEK_API_KEY"],
+            api_key=os.environ.get("DEEPSEEK_API_KEY"),
             base_url="https://api.deepseek.com"
         )
         return client, model
     elif model == "llama3.1-405b":
         print(f"Using OpenAI API with {model}.")
         client = openai.OpenAI(
-            api_key=os.environ["OPENROUTER_API_KEY"],
+            api_key=os.environ.get("OPENROUTER_API_KEY"),
             base_url="https://openrouter.ai/api/v1"
         )
         return client, model
+    
+    # Local API models (Ollama, LocalAI)
     elif model.startswith("ollama/"):
         client_model = model.split("/", 1)[1]
         print(f"Using Ollama with model {client_model}.")
@@ -166,6 +285,8 @@ def create_client(model: str):
             api_key=api_key
         )
         return client, client_model
+    
+    # Direct local model loading
     elif model.startswith("llama-cpp"):
         # Format: 'llama-cpp/<absolute_path_to_model.gguf>' or set LLAMA_CPP_MODEL_PATH
         model_path = model[len("llama-cpp/"):] if len(model) > len("llama-cpp/") else os.getenv("LLAMA_CPP_MODEL_PATH")
@@ -177,6 +298,22 @@ def create_client(model: str):
         print(f"Using llama-cpp local model at {model_path} (ctx={n_ctx}, gpu_layers={n_gpu_layers}, chat_format={chat_format}).")
         client = LlamaCppChatClient(model_path=model_path, n_ctx=n_ctx, n_gpu_layers=n_gpu_layers, chat_format=chat_format)
         # For llama-cpp we return the model string as-is; downstream uses it only for routing
+        return client, model
+    elif model.startswith("hf/"):
+        # Format: 'hf/<repo_id>[/filename]'
+        parts = model.split("/", 2)
+        repo_id = parts[1] if len(parts) > 1 else None
+        filename = parts[2] if len(parts) > 2 else None
+        
+        if not repo_id:
+            raise ValueError("Hugging Face repository ID not provided. Format should be 'hf/<repo_id>' or 'hf/<repo_id>/<filename>'")
+        
+        n_ctx = int(os.getenv("HF_N_CTX", "8192"))
+        n_gpu_layers = int(os.getenv("HF_N_GPU_LAYERS", "0"))
+        chat_format = os.getenv("HF_CHAT_FORMAT", "llama-3")
+        
+        print(f"Using Hugging Face model from {repo_id} (ctx={n_ctx}, gpu_layers={n_gpu_layers}, chat_format={chat_format}).")
+        client = HuggingFaceChatClient(repo_id=repo_id, filename=filename, n_ctx=n_ctx, n_gpu_layers=n_gpu_layers, chat_format=chat_format)
         return client, model
     else:
         raise ValueError(f"Model {model} not supported.")
