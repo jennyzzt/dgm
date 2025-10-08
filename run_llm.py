@@ -2,6 +2,7 @@
 
 import os
 import sys
+import argparse
 
 # Add the parent directory to the Python path to allow imports from the project
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
@@ -9,29 +10,26 @@ sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 from llm import create_client
 
 def main():
-    print("Select an LLM provider:")
-    print("1. OpenAI (requires OPENAI_API_KEY environment variable)")
-    print("2. Hugging Face (requires HF_TOKEN environment variable for private/gated models)")
-    print("3. Local GGUF Model")
-
-    choice = input("Enter your choice (1-3): ")
+    parser = argparse.ArgumentParser(description="Select and run an LLM provider.")
+    parser.add_argument("--provider", type=str, choices=["openai", "huggingface", "local"], required=True,
+                        help="Choose an LLM provider: openai, huggingface, or local.")
+    parser.add_argument("--model", type=str, required=True,
+                        help="Specify the model name or path based on the provider.")
+    parser.add_argument("--filename", type=str, default=None,
+                        help="Optional filename for Hugging Face models.")
+    
+    args = parser.parse_args()
 
     model_name = ""
-    if choice == "1":
-        model_name = input("Enter OpenAI model name (e.g., gpt-4o): ")
-    elif choice == "2":
-        repo_id = input("Enter Hugging Face repo ID (e.g., TheBloke/Llama-3.1-8B-Instruct-GGUF): ")
-        filename = input("Enter optional filename (leave blank to auto-detect): ")
-        if filename:
-            model_name = f"hf/{repo_id}/{filename}"
+    if args.provider == "openai":
+        model_name = args.model
+    elif args.provider == "huggingface":
+        if args.filename:
+            model_name = f"hf/{args.model}/{args.filename}"
         else:
-            model_name = f"hf/{repo_id}"
-    elif choice == "3":
-        model_path = input("Enter path to local GGUF model file or directory: ")
-        model_name = f"local/{model_path}"
-    else:
-        print("Invalid choice.")
-        sys.exit(1)
+            model_name = f"hf/{args.model}"
+    elif args.provider == "local":
+        model_name = f"local/{args.model}"
 
     try:
         client, _ = create_client(model_name)
