@@ -51,6 +51,11 @@ def main():
     # Test LocalAI if base URL is set
     if os.environ.get("LOCALAI_BASE_URL"):
         test_local_model("localai/llama3")
+
+    # Test GGUF model discovery if directory is set
+    if os.environ.get("GGUF_MODEL_DIR"):
+        # Assuming a model named 'my-gguf-model.gguf' exists in GGUF_MODEL_DIR
+        test_local_model("my-gguf-model")
     
     print("\nTest completed!")
 

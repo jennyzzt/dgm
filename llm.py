@@ -7,14 +7,29 @@ from types import SimpleNamespace
 import anthropic
 import backoff
 import openai
+MAX_OUTPUT_TOKENS = 2048
 
-# Optional local model runtimes
-try:
-    from llama_cpp import Llama
-except Exception:
-    Llama = None
+from huggingface_hub import hf_hub_download
 
-    # OpenAI models
+def find_gguf_models(search_dir: str) -> dict[str, str]:
+    """
+    Searches a directory for GGUF model files and returns a dictionary
+    mapping model names (filenames without .gguf extension) to their full paths.
+    """
+    found_models = {}
+    if not os.path.isdir(search_dir):
+        print(f"Warning: GGUF search directory '{search_dir}' does not exist.")
+        return found_models
+
+    for root, _, files in os.walk(search_dir):
+        for file in files:
+            if file.endswith(".gguf"):
+                model_path = os.path.join(root, file)
+                model_name = os.path.splitext(file)[0]
+                found_models[model_name] = model_path
+    return found_models
+
+AVAILABLE_LLMS = [
     "gpt-4o-mini-2024-07-18",
     "gpt-4o-2024-05-13",
     "gpt-4o-2024-08-06",
@@ -22,15 +37,12 @@ except Exception:
     "o1-mini-2024-09-12",
     "o1-2024-12-17",
     "o3-mini-2025-01-31",
-    # OpenRouter models
     "llama3.1-405b",
-    # Anthropic Claude models via Amazon Bedrock
     "bedrock/anthropic.claude-3-sonnet-20240229-v1:0",
     "bedrock/anthropic.claude-3-5-sonnet-20240620-v1:0",
-    "bedrock/anthropic.claude-3-5-sonnet-20241022-v2:0",
-    "bedrock/anthropic.claude-3-haiku-20240307-v1:0",
-    "bedrock/anthropic.claude-3-opus-20240229-v1:0",
-    "bedrock/us.anthropic.claude-3-5-sonnet-20241022-v2:0",
+]
+
+# Optional local model runtimes
     # Anthropic Claude models Vertex AI
     "vertex_ai/claude-3-opus@20240229",
     "vertex_ai/claude-3-5-sonnet@20240620",
@@ -316,6 +328,20 @@ def create_client(model: str):
         client = HuggingFaceChatClient(repo_id=repo_id, filename=filename, n_ctx=n_ctx, n_gpu_layers=n_gpu_layers, chat_format=chat_format)
         return client, model
     else:
+        # Try to find a GGUF model in the local directory
+        gguf_search_dir = os.environ.get("GGUF_MODEL_DIR")
+        if gguf_search_dir:
+            found_models = find_gguf_models(gguf_search_dir)
+            if model in found_models:
+                model_path = found_models[model]
+                print(f"Found local GGUF model '{model}' at {model_path}")
+                n_ctx = int(os.getenv("LLAMA_CPP_N_CTX", "8192"))
+                n_gpu_layers = int(os.getenv("LLAMA_CPP_N_GPU_LAYERS", "0"))
+                chat_format = os.getenv("LLAMA_CPP_CHAT_FORMAT", "llama-3")
+                client = LlamaCppChatClient(model_path=model_path, n_ctx=n_ctx, n_gpu_layers=n_gpu_layers, chat_format=chat_format)
+                return client, model
+            else:
+                print(f"Local GGUF model '{model}' not found in '{gguf_search_dir}'.")
         raise ValueError(f"Model {model} not supported.")
 
 # Get N responses from a single message, used for ensembling.

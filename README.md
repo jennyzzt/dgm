@@ -34,9 +34,9 @@ export DEEPSEEK_API_KEY='...'
 
 ## Option 1: Local endpoints for LocalAI / Ollama (OpenAI-compatible)
 export LOCALAI_BASE_URL='http://localhost:8080/v1'   # default if unset
-export LOCALAI_API_KEY='localai'                      # default if unset
+export LOCALAI_API_KEY='localai'                      # Optional: default if unset
 export OLLAMA_BASE_URL='http://localhost:11434/v1'   # default if unset
-export OLLAMA_API_KEY='ollama'                        # default if unset
+export OLLAMA_API_KEY='ollama'                        # Optional: default if unset
 
 ## Option 2: Local file models via llama.cpp
 export LLAMA_CPP_MODEL_PATH='/abs/path/to/model.gguf'
@@ -76,7 +76,7 @@ DGM now supports running with local AI models in addition to cloud API-based mod
 
 3. **Direct GGUF Models via llama.cpp**:
    - Download a GGUF model file
-   - Set `LLAMA_CPP_MODEL_PATH` to the absolute path of your model file
+   - Set `LLAMA_CPP_MODEL_PATH` to the absolute path of your model file, or set `GGUF_MODEL_DIR` to a directory containing your GGUF models for automatic discovery.
    - Configure context size and GPU acceleration as needed
 
 4. **Hugging Face Models**:
@@ -163,6 +163,7 @@ python coding_agent.py --problem_statement "..." --git_dir /path/to/repo \
 You can run GGUF models locally using llama.cpp via llama-cpp-python. Either:
 - Set `DGM_MODEL="llama-cpp/<absolute_path_to_model.gguf>"`, or
 - Set `LLAMA_CPP_MODEL_PATH` environment variable and use `DGM_MODEL=llama-cpp`.
+- **New: Automatic GGUF Model Discovery**: Set `GGUF_MODEL_DIR` to a directory containing your GGUF models. DGM will automatically discover and load models from this directory. To use a discovered model, set `DGM_MODEL=<model_name_without_gguf_extension>`.
 
 Optional tuning via env vars:
 - `LLAMA_CPP_N_CTX` (default 8192)
