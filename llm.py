@@ -9,7 +9,43 @@ import backoff
 import openai
 MAX_OUTPUT_TOKENS = 2048
 
-from huggingface_hub import hf_hub_download
+AVAILABLE_LLMS = [
+    "gpt-4o-mini-2024-07-18",
+    "gpt-4o-2024-05-13",
+    "gpt-4o-2024-08-06",
+    "o1-preview-2024-09-12",
+    "o1-mini-2024-09-12",
+    "o1-2024-12-17",
+    "o3-mini-2025-01-31",
+    "llama3.1-405b",
+    "bedrock/anthropic.claude-3-sonnet-20240229-v1:0",
+    "bedrock/anthropic.claude-3-5-sonnet-20240620-v1:0",
+    "bedrock/anthropic.claude-3-5-sonnet-20241022-v2:0",
+    "bedrock/anthropic.claude-3-haiku-20240307-v1:0",
+    "bedrock/anthropic.claude-3-opus-20240229-v1:0",
+    "bedrock/us.anthropic.claude-3-5-sonnet-20241022-v2:0",
+    "vertex_ai/claude-3-opus@20240229",
+    "vertex_ai/claude-3-5-sonnet@20240620",
+    "vertex_ai/claude-3-5-sonnet-v2@20241022",
+    "vertex_ai/claude-3-sonnet@20240229",
+    "vertex_ai/claude-3-haiku@20240307",
+    "deepseek-chat",
+    "deepseek-coder",
+    "deepseek-reasoner",
+    "ollama/llama3.2",
+    "ollama/llama3.1",
+]
+
+# Optional local model runtimes
+try:
+    from llama_cpp import Llama
+except Exception:
+    Llama = None
+
+try:
+    import huggingface_hub
+except ImportError:
+    huggingface_hub = None
 
 def find_gguf_models(search_dir: str) -> dict[str, str]:
     """
@@ -29,31 +65,6 @@ def find_gguf_models(search_dir: str) -> dict[str, str]:
                 found_models[model_name] = model_path
     return found_models
 
-AVAILABLE_LLMS = [
-    "gpt-4o-mini-2024-07-18",
-    "gpt-4o-2024-05-13",
-    "gpt-4o-2024-08-06",
-    "o1-preview-2024-09-12",
-    "o1-mini-2024-09-12",
-    "o1-2024-12-17",
-    "o3-mini-2025-01-31",
-    "llama3.1-405b",
-    "bedrock/anthropic.claude-3-sonnet-20240229-v1:0",
-    "bedrock/anthropic.claude-3-5-sonnet-20240620-v1:0",
-]
-
-# Optional local model runtimes
-    # Anthropic Claude models Vertex AI
-    "vertex_ai/claude-3-opus@20240229",
-    "vertex_ai/claude-3-5-sonnet@20240620",
-    "vertex_ai/claude-3-5-sonnet-v2@20241022",
-    "vertex_ai/claude-3-sonnet@20240229",
-    "vertex_ai/claude-3-haiku@20240307",
-    # DeepSeek models
-    "deepseek-chat",
-    "deepseek-coder",
-    "deepseek-reasoner",
-    # Ollama models (examples; users can specify any Ollama model as ollama/<model_name>)
     "ollama/llama3.2",
     "ollama/llama3.1",
     "ollama/codellama",
@@ -75,9 +86,13 @@ class LocalModelClient:
     """Base class for local model clients that provide OpenAI-compatible interfaces."""
     
     def __init__(self):
-        self.chat = SimpleNamespace()
-        self.chat.completions = SimpleNamespace()
-        self.chat.completions.create = self._create_completion
+        self._openai_compatible_chat = SimpleNamespace()
+        self._openai_compatible_chat.completions = SimpleNamespace()
+        self._openai_compatible_chat.completions.create = self._create_completion
+    
+    @property
+    def chat(self):
+        return self._openai_compatible_chat
     
     def _create_completion(self, **kwargs):
         """To be implemented by subclasses."""
@@ -312,20 +327,20 @@ def create_client(model: str):
         # For llama-cpp we return the model string as-is; downstream uses it only for routing
         return client, model
     elif model.startswith("hf/"):
-        # Format: 'hf/<repo_id>[/filename]'
-        parts = model.split("/", 2)
-        repo_id = parts[1] if len(parts) > 1 else None
-        filename = parts[2] if len(parts) > 2 else None
+        parts = model.split("/", 2) # Split only twice to get "hf", "owner/repo", "filename" (optional)
+        if len(parts) < 2:
+            raise ValueError(f"Invalid Hugging Face model format: {model}. Expected hf/owner/repo or hf/owner/repo/filename")
         
-        if not repo_id:
-            raise ValueError("Hugging Face repository ID not provided. Format should be 'hf/<repo_id>' or 'hf/<repo_id>/<filename>'")
-        
-        n_ctx = int(os.getenv("HF_N_CTX", "8192"))
-        n_gpu_layers = int(os.getenv("HF_N_GPU_LAYERS", "0"))
-        chat_format = os.getenv("HF_CHAT_FORMAT", "llama-3")
-        
-        print(f"Using Hugging Face model from {repo_id} (ctx={n_ctx}, gpu_layers={n_gpu_layers}, chat_format={chat_format}).")
-        client = HuggingFaceChatClient(repo_id=repo_id, filename=filename, n_ctx=n_ctx, n_gpu_layers=n_gpu_layers, chat_format=chat_format)
+        repo_id_full = parts[1]
+        filename = None
+        if len(parts) == 3:
+            filename = parts[2]
+
+        print(f"Using Hugging Face model {repo_id_full} (filename: {filename}).")
+        n_ctx = int(os.getenv("LLAMA_CPP_N_CTX", "8192"))
+        n_gpu_layers = int(os.getenv("LLAMA_CPP_N_GPU_LAYERS", "0"))
+        chat_format = os.getenv("LLAMA_CPP_CHAT_FORMAT", "llama-3")
+        client = HuggingFaceChatClient(repo_id=repo_id_full, filename=filename, n_ctx=n_ctx, n_gpu_layers=n_gpu_layers, chat_format=chat_format)
         return client, model
     else:
         # Try to find a GGUF model in the local directory
