@@ -160,6 +160,7 @@ class HuggingFaceChatClient(LocalModelClient):
     
     def __init__(self, repo_id: str, filename: str = None, n_ctx: int = 8192, n_gpu_layers: int = 0, chat_format: str = "llama-3"):
         super().__init__()
+        model_path = None
         if huggingface_hub is None:
             raise ImportError(
                 "huggingface_hub is not installed. Install with: pip install huggingface_hub"
@@ -195,7 +196,7 @@ class HuggingFaceChatClient(LocalModelClient):
                 filename = gguf_files[0]
                 
             model_path = huggingface_hub.hf_hub_download(repo_id=repo_id, filename=filename)
-        
+
         print(f"Model downloaded to: {model_path}")
         
         # Initialize llama.cpp with the downloaded model
@@ -352,6 +353,28 @@ def create_client(model: str):
         n_gpu_layers = int(os.getenv("LLAMA_CPP_N_GPU_LAYERS", "0"))
         chat_format = os.getenv("LLAMA_CPP_CHAT_FORMAT", "llama-3")
         client = HuggingFaceChatClient(repo_id=repo_id_full, filename=filename, n_ctx=n_ctx, n_gpu_layers=n_gpu_layers, chat_format=chat_format)
+        return client, model
+    elif model.startswith("local/"):
+        local_path = model[len("local/"):]
+        if not os.path.exists(local_path):
+            raise FileNotFoundError(f"Local model path not found: {local_path}")
+
+        # If it's a directory, try to find a GGUF file within it
+        if os.path.isdir(local_path):
+            gguf_files = [os.path.join(local_path, f) for f in os.listdir(local_path) if f.endswith(".gguf")]
+            if not gguf_files:
+                raise ValueError(f"No GGUF files found in local directory: {local_path}")
+            # For simplicity, just pick the first one found
+            model_path = gguf_files[0]
+            print(f"Using local GGUF model from directory: {model_path}")
+        else:
+            model_path = local_path
+            print(f"Using local GGUF model: {model_path}")
+
+        n_ctx = int(os.getenv("LLAMA_CPP_N_CTX", "8192"))
+        n_gpu_layers = int(os.getenv("LLAMA_CPP_N_GPU_LAYERS", "0"))
+        chat_format = os.getenv("LLAMA_CPP_CHAT_FORMAT", "llama-3")
+        client = LlamaCppChatClient(model_path=model_path, n_ctx=n_ctx, n_gpu_layers=n_gpu_layers, chat_format=chat_format)
         return client, model
     else:
         # Try to find a GGUF model in the local directory
