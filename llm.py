@@ -327,14 +327,21 @@ def create_client(model: str):
         # For llama-cpp we return the model string as-is; downstream uses it only for routing
         return client, model
     elif model.startswith("hf/"):
-        parts = model.split("/", 2) # Split only twice to get "hf", "owner/repo", "filename" (optional)
-        if len(parts) < 2:
-            raise ValueError(f"Invalid Hugging Face model format: {model}. Expected hf/owner/repo or hf/owner/repo/filename")
+        # Remove "hf/" prefix
+        hf_path = model[len("hf/"):]
         
-        repo_id_full = parts[1]
+        parts = hf_path.split('/')
+        
+        repo_id_full = hf_path
         filename = None
-        if len(parts) == 3:
-            filename = parts[2]
+
+        # If the last part contains a dot, assume it's a filename
+        if len(parts) > 1 and '.' in parts[-1]:
+            filename = parts[-1]
+            repo_id_full = '/'.join(parts[:-1])
+
+        if not repo_id_full:
+            raise ValueError(f"Invalid Hugging Face model format: {model}. Expected hf/owner/repo or hf/owner/repo/filename")
 
         print(f"Using Hugging Face model {repo_id_full} (filename: {filename}).")
         n_ctx = int(os.getenv("LLAMA_CPP_N_CTX", "8192"))
