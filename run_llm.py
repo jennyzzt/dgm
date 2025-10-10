@@ -47,7 +47,17 @@ def main():
             "ollama, localai, llama-cpp, huggingface, or local."
         ),
     )
-    parser.add_argument("--model", type=str, required=True, help="Specify the model name or path based on the provider.")
+    parser.add_argument(
+        "--model",
+        type=str,
+        help="Specify the model name or path based on the provider. Required unless --provider is 'local' and --model_dir is used.",
+    )
+    parser.add_argument(
+        "--model_dir",
+        type=str,
+        default=None,
+        help="Directory to search for GGUF models when --provider is 'local'.",
+    )
     parser.add_argument("--filename", type=str, default=None, help="Optional filename for Hugging Face models.")
 
     args = parser.parse_args()
@@ -99,12 +109,50 @@ def main():
         else:
             model_name = f"hf/{args.model}"
     elif provider == "local":
-        # If a path-like is provided, use local/<path or dir>. If a plain name is provided,
-        # let GGUF discovery find it via GGUF_MODEL_DIR by passing the bare name.
-        if _is_pathlike(args.model):
-            model_name = f"local/{args.model}"
+        if args.model_dir:
+            if not os.path.isdir(args.model_dir):
+                print(f"Error: Model directory not found at {args.model_dir}")
+                sys.exit(1)
+            
+            gguf_files = [f for f in os.listdir(args.model_dir) if f.endswith(".gguf")]
+            if not gguf_files:
+                print(f"No GGUF files found in {args.model_dir}")
+                sys.exit(1)
+            
+            if args.model:
+                # If a specific model is provided, check if it exists in the directory
+                if args.model not in gguf_files:
+                    print(f"Error: Specified model {args.model} not found in {args.model_dir}")
+                    sys.exit(1)
+                model_name = f"local/{os.path.join(args.model_dir, args.model)}"
+            else:
+                # If no specific model is provided, list them for interactive selection
+                print(f"Found GGUF models in {args.model_dir}:")
+                for i, file in enumerate(gguf_files):
+                    print(f"{i + 1}. {file}")
+                
+                while True:
+                    try:
+                        selection = input("Select a model by number: ")
+                        index = int(selection) - 1
+                        if 0 <= index < len(gguf_files):
+                            selected_file = gguf_files[index]
+                            model_name = f"local/{os.path.join(args.model_dir, selected_file)}"
+                            break
+                        else:
+                            print("Invalid selection. Please enter a valid number.")
+                    except ValueError:
+                        print("Invalid input. Please enter a number.")
+        elif args.model:
+            # If a path-like is provided, use local/<path or dir>. If a plain name is provided,
+            # let GGUF discovery find it via GGUF_MODEL_DIR by passing the bare name.
+            if _is_pathlike(args.model):
+                model_name = f"local/{args.model}"
+            else:
+                model_name = args.model
         else:
-            model_name = args.model
+            print("Error: For local provider, either --model or --model_dir must be specified.")
+            sys.exit(1)
 
     try:
         client, resolved_model = create_client(model_name)
