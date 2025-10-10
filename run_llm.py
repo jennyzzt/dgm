@@ -162,7 +162,7 @@ def main():
             model=resolved_model,
             messages=[{"role": "user", "content": "Tell me a short story about a robot."}],
         )
-        print(response.choices[0].message.content)
+        print(response.content)
 
     except Exception as e:
         print(f"Error creating client: {e}")
@@ -170,3 +170,5 @@ def main():
 
 if __name__ == "__main__":
     main()
+
+model_path = os.path.join(args.model_dir, "llama-2-7b.Q4_K_M.gguf")
