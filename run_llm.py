@@ -158,11 +158,11 @@ def main():
         client, resolved_model = create_client(model_name)
         print(f"Successfully created client for model: {model_name} (resolved: {resolved_model})")
         # Example usage (commented):
-        # response = client.chat.completions.create(
-        #     model=resolved_model,
-        #     messages=[{"role": "user", "content": "Hello, how are you?"}],
-        # )
-        # print(response.choices[0].message.content)
+        response = client.chat.completions.create(
+            model=resolved_model,
+            messages=[{"role": "user", "content": "Tell me a short story about a robot."}],
+        )
+        print(response.choices[0].message.content)
 
     except Exception as e:
         print(f"Error creating client: {e}")
