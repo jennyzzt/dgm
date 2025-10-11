@@ -5,6 +5,8 @@ backoff
 botocore
 boto3
 openai
+llama-cpp-python
+huggingface_hub
 
 # SWE-Bench
 beautifulsoup4

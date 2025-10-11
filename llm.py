@@ -2,17 +2,14 @@
 import json
 import os
 import re
+from types import SimpleNamespace
 
 import anthropic
 import backoff
 import openai
+MAX_OUTPUT_TOKENS = 2048
 
-MAX_OUTPUT_TOKENS = 4096
 AVAILABLE_LLMS = [
-    # Anthropic models
-    "claude-3-5-sonnet-20240620",
-    "claude-3-5-sonnet-20241022",
-    # OpenAI models
     "gpt-4o-mini-2024-07-18",
     "gpt-4o-2024-05-13",
     "gpt-4o-2024-08-06",
@@ -39,7 +36,222 @@ AVAILABLE_LLMS = [
     "deepseek-chat",
     "deepseek-coder",
     "deepseek-reasoner",
+    "ollama/llama3.2",
+    "ollama/llama3.1",
 ]
+
+# Optional local model runtimes
+try:
+    from llama_cpp import Llama
+except Exception:
+    Llama = None
+
+try:
+    import huggingface_hub
+except ImportError:
+    huggingface_hub = None
+
+def find_gguf_models(search_dir: str) -> dict[str, str]:
+    """
+    Searches a directory for GGUF model files and returns a dictionary
+    mapping model names (filenames without .gguf extension) to their full paths.
+    """
+    found_models = {}
+    if not os.path.isdir(search_dir):
+        print(f"Warning: GGUF search directory '{search_dir}' does not exist.")
+        return found_models
+
+    for root, _, files in os.walk(search_dir):
+        for file in files:
+            if file.endswith(".gguf"):
+                model_path = os.path.join(root, file)
+                model_name = os.path.splitext(file)[0]
+                found_models[model_name] = model_path
+    return found_models
+
+    "ollama/llama3.2",
+    "ollama/llama3.1",
+    "ollama/codellama",
+    "ollama/mistral",
+    # LocalAI models (examples; users can specify any LocalAI model as localai/<model_name>)
+    "localai/llama-3.2-3b-instruct",
+    "localai/llama-3.1-8b-instruct",
+    "localai/mistral-7b-instruct",
+    # Hugging Face models (examples; users can specify any HF model as hf/<repo_id>)
+    "hf/TheBloke/Llama-3.1-8B-Instruct-GGUF",
+    "hf/TheBloke/Mistral-7B-Instruct-v0.2-GGUF",
+    "hf/TheBloke/Phi-3-mini-4k-instruct-GGUF",
+    # Local file models via llama.cpp (examples)
+    # Use DGM_MODEL='llama-cpp/<absolute_path_to_model.gguf>' or set LLAMA_CPP_MODEL_PATH
+    "llama-cpp",
+
+
+class LocalModelClient:
+    """Base class for local model clients that provide OpenAI-compatible interfaces."""
+    
+    def __init__(self):
+        self._openai_compatible_chat = SimpleNamespace()
+        self._openai_compatible_chat.completions = SimpleNamespace()
+        self._openai_compatible_chat.completions.create = self._create_completion
+    
+    @property
+    def chat(self):
+        return self._openai_compatible_chat
+    
+    def _create_completion(self, **kwargs):
+        """To be implemented by subclasses."""
+        raise NotImplementedError("Subclasses must implement _create_completion")
+    
+    def _format_response(self, content):
+        """Format response to match OpenAI API response structure."""
+        response = SimpleNamespace()
+        response.choices = [SimpleNamespace()]
+        response.choices[0].message = SimpleNamespace()
+        response.choices[0].message.content = content
+        return response
+
+class LlamaCppChatClient(LocalModelClient):
+    """Minimal OpenAI-compatible chat client backed by llama.cpp (local GGUF files).
+
+    It exposes client.chat.completions.create(...), returning an object with
+    .choices[0].message.content to match the OpenAI client usage in this codebase.
+    """
+
+    def __init__(self, model_path: str, n_ctx: int = 8192, n_gpu_layers: int = 0, chat_format: str = "llama-3"):
+        super().__init__()
+        if Llama is None:
+            raise ImportError(
+                "llama-cpp-python is not installed. Install with: pip install llama-cpp-python"
+            )
+        # Initialize llama.cpp
+        self._llm = Llama(
+            model_path=model_path,
+            n_ctx=n_ctx,
+            n_gpu_layers=n_gpu_layers,
+            chat_format=chat_format,
+        )
+        
+    def _create_completion(self, model, messages, temperature=0.7, max_tokens=MAX_OUTPUT_TOKENS, **kwargs):
+        """Create a chat completion using llama.cpp."""
+        # Format messages for llama.cpp
+        formatted_messages = []
+        for msg in messages:
+            role = msg.get("role", "")
+            content = msg.get("content", "")
+            if isinstance(content, list):
+                # Handle content that might be a list of content blocks
+                content = " ".join([c.get("text", "") if isinstance(c, dict) else c for c in content])
+            formatted_messages.append({"role": role, "content": content})
+        
+        # Generate completion
+        completion = self._llm.create_chat_completion(
+            messages=formatted_messages,
+            temperature=temperature,
+            max_tokens=max_tokens,
+        )
+        
+        return completion
+
+class HuggingFaceChatClient(LocalModelClient):
+    """OpenAI-compatible chat client for Hugging Face models.
+    
+    Downloads models from Hugging Face Hub and uses llama.cpp to run them.
+    """
+    
+    def __init__(self, repo_id: str, filename: str = None, n_ctx: int = 8192, n_gpu_layers: int = 0, chat_format: str = "llama-3"):
+        super().__init__()
+        model_path = None
+        if huggingface_hub is None:
+            raise ImportError(
+                "huggingface_hub is not installed. Install with: pip install huggingface_hub"
+            )
+        if Llama is None:
+            raise ImportError(
+                "llama-cpp-python is not installed. Install with: pip install llama-cpp-python"
+            )
+            
+        # Download model from Hugging Face
+        print(f"Downloading model from Hugging Face: {repo_id}")
+        if filename:
+            model_path = huggingface_hub.hf_hub_download(repo_id=repo_id, filename=filename)
+        else:
+            # Try to find a GGUF file in the repo
+            files = huggingface_hub.list_repo_files(repo_id=repo_id)
+            gguf_files = [f for f in files if f.endswith(".gguf")]
+            if not gguf_files:
+                raise ValueError(f"No GGUF files found in repository {repo_id}")
+            
+            # Prefer smaller quantized models (Q4_K_M, Q5_K_M) if available
+            preferred_quantizations = ["Q4_K_M", "Q5_K_M", "Q4_0", "Q5_0", "Q8_0"]
+            for quant in preferred_quantizations:
+                for file in gguf_files:
+                    if quant in file:
+                        filename = file
+                        break
+                if filename:
+                    break
+            
+            # If no preferred quantization found, use the first GGUF file
+            if not filename:
+                filename = gguf_files[0]
+                
+            model_path = huggingface_hub.hf_hub_download(repo_id=repo_id, filename=filename)
+
+        print(f"Model downloaded to: {model_path}")
+        
+        # Initialize llama.cpp with the downloaded model
+        self._llm = Llama(
+            model_path=model_path,
+            n_ctx=n_ctx,
+            n_gpu_layers=n_gpu_layers,
+            chat_format=chat_format,
+        )
+    
+    def _create_completion(self, model, messages, temperature=0.7, max_tokens=MAX_OUTPUT_TOKENS, **kwargs):
+        """Create a chat completion using the Hugging Face model via llama.cpp."""
+        # Format messages for llama.cpp
+        formatted_messages = []
+        for msg in messages:
+            role = msg.get("role", "")
+            content = msg.get("content", "")
+            if isinstance(content, list):
+                # Handle content that might be a list of content blocks
+                content = " ".join([c.get("text", "") if isinstance(c, dict) else c for c in content])
+            formatted_messages.append({"role": role, "content": content})
+        
+        # Generate completion
+        completion = self._llm.create_chat_completion(
+            messages=formatted_messages,
+            temperature=temperature,
+            max_tokens=max_tokens,
+        )
+        
+        return completion
+
+    class _Completions:
+        def __init__(self, parent: "LlamaCppChatClient"):
+            self._parent = parent
+
+        def create(self, model=None, messages=None, temperature=0.7, max_tokens=MAX_OUTPUT_TOKENS, n=1, stop=None, seed=None, **kwargs):
+            if messages is None:
+                messages = []
+            args = dict(messages=messages, temperature=float(temperature), max_tokens=int(max_tokens))
+            if stop:
+                args["stop"] = stop
+            # llama-cpp create_chat_completion accepts the OpenAI messages format
+            resp = self._parent._llm.create_chat_completion(**args)
+            # Normalize into an object with .choices[0].message.content
+            content = resp.get("choices", [{}])[0].get("message", {}).get("content", "")
+            return SimpleNamespace(choices=[SimpleNamespace(message=SimpleNamespace(content=content))])
+
+    class _Chat:
+        def __init__(self, parent: "LlamaCppChatClient"):
+            self.completions = LlamaCppChatClient._Completions(parent)
+
+    @property
+    def chat(self):
+        return LlamaCppChatClient._Chat(self)
+
 
 def create_client(model: str):
     """
@@ -49,6 +261,7 @@ def create_client(model: str):
     Returns:
         Tuple[Any, str]: A tuple containing the client instance and the client model name.
     """
+    # Cloud API models
     if model.startswith("claude-"):
         print(f"Using Anthropic API with model {model}.")
         return anthropic.Anthropic(), model
@@ -71,17 +284,113 @@ def create_client(model: str):
     elif model.startswith("deepseek-"):
         print(f"Using OpenAI API with {model}.")
         client = openai.OpenAI(
-            api_key=os.environ["DEEPSEEK_API_KEY"],
+            api_key=os.environ.get("DEEPSEEK_API_KEY"),
             base_url="https://api.deepseek.com"
         )
         return client, model
     elif model == "llama3.1-405b":
         print(f"Using OpenAI API with {model}.")
         client = openai.OpenAI(
-            api_key=os.environ["OPENROUTER_API_KEY"],
+            api_key=os.environ.get("OPENROUTER_API_KEY"),
             base_url="https://openrouter.ai/api/v1"
-        ), model
+        )
+        return client, model
+    
+    # Local API models (Ollama, LocalAI)
+    elif model.startswith("ollama/"):
+        client_model = model.split("/", 1)[1]
+        print(f"Using Ollama with model {client_model}.")
+        base_url = os.getenv("OLLAMA_BASE_URL", "http://localhost:11434/v1")
+        api_key = os.getenv("OLLAMA_API_KEY", "ollama")
+        client = openai.OpenAI(
+            base_url=base_url,
+            api_key=api_key
+        )
+        return client, client_model
+    elif model.startswith("localai/"):
+        client_model = model.split("/", 1)[1]
+        print(f"Using LocalAI with model {client_model}.")
+        base_url = os.getenv("LOCALAI_BASE_URL", "http://localhost:8080/v1")
+        api_key = os.getenv("LOCALAI_API_KEY", "localai")
+        client = openai.OpenAI(
+            base_url=base_url,
+            api_key=api_key
+        )
+        return client, client_model
+    
+    # Direct local model loading
+    elif model.startswith("llama-cpp"):
+        # Format: 'llama-cpp/<absolute_path_to_model.gguf>' or set LLAMA_CPP_MODEL_PATH
+        model_path = model[len("llama-cpp/"):] if len(model) > len("llama-cpp/") else os.getenv("LLAMA_CPP_MODEL_PATH")
+        if not model_path:
+            raise ValueError("llama-cpp model path not provided. Set DGM_MODEL='llama-cpp/<absolute_path_to_gguf>' or LLAMA_CPP_MODEL_PATH env var.")
+        n_ctx = int(os.getenv("LLAMA_CPP_N_CTX", "8192"))
+        n_gpu_layers = int(os.getenv("LLAMA_CPP_N_GPU_LAYERS", "0"))
+        chat_format = os.getenv("LLAMA_CPP_CHAT_FORMAT", "llama-3")
+        print(f"Using llama-cpp local model at {model_path} (ctx={n_ctx}, gpu_layers={n_gpu_layers}, chat_format={chat_format}).")
+        client = LlamaCppChatClient(model_path=model_path, n_ctx=n_ctx, n_gpu_layers=n_gpu_layers, chat_format=chat_format)
+        # For llama-cpp we return the model string as-is; downstream uses it only for routing
+        return client, model
+    elif model.startswith("hf/"):
+        # Remove "hf/" prefix
+        hf_path = model[len("hf/"):]
+        
+        parts = hf_path.split('/')
+        
+        repo_id_full = hf_path
+        filename = None
+
+        # If the last part contains a dot, assume it's a filename
+        if len(parts) > 1 and '.' in parts[-1]:
+            filename = parts[-1]
+            repo_id_full = '/'.join(parts[:-1])
+
+        if not repo_id_full:
+            raise ValueError(f"Invalid Hugging Face model format: {model}. Expected hf/owner/repo or hf/owner/repo/filename")
+
+        print(f"Using Hugging Face model {repo_id_full} (filename: {filename}).")
+        n_ctx = int(os.getenv("LLAMA_CPP_N_CTX", "8192"))
+        n_gpu_layers = int(os.getenv("LLAMA_CPP_N_GPU_LAYERS", "0"))
+        chat_format = os.getenv("LLAMA_CPP_CHAT_FORMAT", "llama-3")
+        client = HuggingFaceChatClient(repo_id=repo_id_full, filename=filename, n_ctx=n_ctx, n_gpu_layers=n_gpu_layers, chat_format=chat_format)
+        return client, model
+    elif model.startswith("local/"):
+        local_path = model[len("local/"):]
+        if not os.path.exists(local_path):
+            raise FileNotFoundError(f"Local model path not found: {local_path}")
+
+        # If it's a directory, try to find a GGUF file within it
+        if os.path.isdir(local_path):
+            gguf_files = [os.path.join(local_path, f) for f in os.listdir(local_path) if f.endswith(".gguf")]
+            if not gguf_files:
+                raise ValueError(f"No GGUF files found in local directory: {local_path}")
+            # For simplicity, just pick the first one found
+            model_path = gguf_files[0]
+            print(f"Using local GGUF model from directory: {model_path}")
+        else:
+            model_path = local_path
+            print(f"Using local GGUF model: {model_path}")
+
+        n_ctx = int(os.getenv("LLAMA_CPP_N_CTX", "8192"))
+        n_gpu_layers = int(os.getenv("LLAMA_CPP_N_GPU_LAYERS", "0"))
+        chat_format = os.getenv("LLAMA_CPP_CHAT_FORMAT", "llama-3")
+        client = LlamaCppChatClient(model_path=model_path, n_ctx=n_ctx, n_gpu_layers=n_gpu_layers, chat_format=chat_format)
+        return client, model
     else:
+        # Try to find a GGUF model in the local directory
+        gguf_search_dir = os.environ.get("GGUF_MODEL_DIR")
+        if gguf_search_dir:
+            found_models = find_gguf_models(gguf_search_dir)
+            if model in found_models:
+                model_path = found_models[model]
+                print(f"Found local GGUF model '{model}' at {model_path}")
+                n_ctx = int(os.getenv("LLAMA_CPP_N_CTX", "8192"))
+                n_gpu_layers = int(os.getenv("LLAMA_CPP_N_GPU_LAYERS", "0"))
+                chat_format = os.getenv("LLAMA_CPP_CHAT_FORMAT", "llama-3")
+                client = LlamaCppChatClient(model_path=model_path, n_ctx=n_ctx, n_gpu_layers=n_gpu_layers, chat_format=chat_format)
+                return client, model
+            else:
+                print(f"Local GGUF model '{model}' not found in '{gguf_search_dir}'.")
         raise ValueError(f"Model {model} not supported.")
 
 # Get N responses from a single message, used for ensembling.
@@ -292,7 +601,21 @@ def get_response_from_llm(
         new_msg_history = new_msg_history + [{"role": "assistant", "content": content}]
         resoning_content = response.choices[0].message.reasoning_content
     else:
-        raise ValueError(f"Model {model} not supported.")
+        # General OpenAI-compatible handling (e.g., Ollama, LocalAI, llama-cpp wrapper)
+        new_msg_history = msg_history + [{"role": "user", "content": msg}]
+        response = client.chat.completions.create(
+            model=model,
+            messages=[
+                {"role": "system", "content": system_message},
+                *new_msg_history,
+            ],
+            temperature=temperature,
+            max_tokens=MAX_OUTPUT_TOKENS,
+            n=1,
+            stop=None,
+        )
+        content = response.choices[0].message.content
+        new_msg_history = new_msg_history + [{"role": "assistant", "content": content}]
     if print_debug:
         print()
         print("*" * 20 + " LLM START " + "*" * 20)
