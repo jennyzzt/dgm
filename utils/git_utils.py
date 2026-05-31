@@ -123,13 +123,13 @@ def filter_patch_by_files(patch_str, target_files):
     return "\n".join(filtered_lines)
 
 
-def remove_patch_by_files(patch_str, keyword='polyglot'):
+def remove_patch_by_files(patch_str, keyword='nn_bench'):
     """
     Removes diff blocks related to files containing the keyword from a patch string.
 
     Args:
         patch_str (str): The complete patch text.
-        keyword (str): Keyword to match in filenames for removal (default: 'polyglot').
+        keyword (str): Keyword to match in filenames for removal (default: 'nn_bench').
 
     Returns:
         str: A string containing the patch with diff blocks for matching files removed.
