@@ -100,7 +100,7 @@ def choose_selfimproves(output_dir, archive, selfimprove_size, method='random', 
         parent_commits = random.choices(commits, probabilities, k=selfimprove_size)
     elif method == 'best':
         # Choose parents with the best score
-        sorted_commits = sorted(candidates, key=lambda x: candidates[x]['accuracy_score'])
+        sorted_commits = sorted(candidates, key=lambda x: candidates[x]['accuracy_score'], reverse=True)
         parent_commits = sorted_commits[:min(selfimprove_size, len(sorted_commits))]
         if len(parent_commits) < selfimprove_size:
             parent_commits.extend(random.choices(parent_commits, k=selfimprove_size - len(parent_commits)))
@@ -225,7 +225,7 @@ def main():
     parser.add_argument("--selfimprove_workers", type=int, default=2, help="Number of parallel workers for self-improvement attempts.")
     parser.add_argument(
         "--choose_selfimproves_method", type=str, default='score_child_prop',
-        choices=['random', 'score_prop', 'score_child_prop' 'best'],
+        choices=['random', 'score_prop', 'score_child_prop', 'best'],
         help="Method to choose self-improve attempts.",
     )
     parser.add_argument("--continue_from", type=str, default=None, help="Directory to continue the run from.")
