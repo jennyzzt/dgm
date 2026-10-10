@@ -141,7 +141,7 @@ def choose_selfimproves(output_dir, archive, selfimprove_size, method='random', 
                 continue
 
             # Choose a random unresolved entry
-            if unresolved_ids == 0:
+            if not unresolved_ids:
                 continue
             entry_ids = unresolved_ids
         entry = random.choice(entry_ids)
@@ -333,4 +333,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-
