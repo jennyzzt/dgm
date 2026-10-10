@@ -152,7 +152,7 @@ def run_harness_swe(entry, model_name_or_path, patch_files, num_evals, output_di
     # Check if additional evaluation should be run
     if (overall_performance and \
         test_more_threshold is not None and test_task_list_more is not None and \
-            overall_performance.get('total_resolved_instances', 0) >= len(test_task_list) * test_more_threshold):
+            overall_performance.get('total_resolved_instances', 0) >= len(test_task_list) * num_evals * test_more_threshold):
         safe_log("Start additional evaluation cycle")
         dnames = harness(
             test_task_list=test_task_list_more,
@@ -201,7 +201,7 @@ def run_harness_polyglot(entry, model_name_or_path, patch_files, num_evals, outp
     # Check if additional evaluation should be run
     if (overall_performance and \
         test_more_threshold is not None and test_task_list_more is not None and \
-            overall_performance.get('total_resolved_instances', 0) >= len(test_task_list) * test_more_threshold):
+            overall_performance.get('total_resolved_instances', 0) >= len(test_task_list) * num_evals * test_more_threshold):
         safe_log("Start additional evaluation cycle")
         dnames = polyglot_harness(
             test_task_list=test_task_list_more,
