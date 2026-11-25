@@ -172,14 +172,15 @@ def register_git(benchmark_path):
                 else:
                     raise FileNotFoundError(f"Config file not found: {config_path}")
 
-                solution_files = set(config.get("files", {}).get("solution", []))
+                files = config.get("files", {})
+                solution_files = set(files.get("solution", []))
                 if not solution_files:
                     raise ValueError(f"No solution files found in config for {practice_dir}")
 
-                # init commit only with solution files
+                # Include the supporting files supplied to the exercise editor.
                 subprocess.run(["git", "init"], cwd=practice_dir, check=True)
-                for solution_file in solution_files:
-                    subprocess.run(["git", "add", solution_file], cwd=practice_dir, check=True)
+                for path in solution_files.union(files.get("editor", [])):
+                    subprocess.run(["git", "add", "--", path], cwd=practice_dir, check=True)
                 # Add .docs folder if it exists
                 adding_files = [".docs/"]
 

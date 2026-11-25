@@ -62,6 +62,11 @@ cd ../../
 python -m polyglot.prepare_polyglot_dataset
 ```
 
+If you prepared Polyglot before editor files were included, move the existing
+`polyglot/polyglot-benchmark` directory aside and rerun the preparation command
+to generate fresh exercise commits and metadata. If you cached Polyglot instance
+images (`pb.eval.*`), rebuild them for the regenerated dataset before running evaluations.
+
 ## Running the DGM
 ```bash
 python DGM_outer.py
